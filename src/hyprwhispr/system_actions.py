@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 
+from . import apps
 from .notify import log_event
 from .permissions import confirm
 from .validation import args_ok, valid_package
@@ -48,11 +49,14 @@ def tool_install_package(cfg: dict, package: str) -> str:
         log_event({"event": "tool_denied", "tool": "install_package", "package": package})
         return "user denied the package installation"
     log_event({"event": "tool_approved", "tool": "install_package", "package": package})
-    terminal = shutil.which(cfg["terminal_bin"]) or "kitty"
+    terminal = apps.resolve_terminal(cfg)
+    if not terminal.found:
+        return ("error: no terminal emulator is installed (tried "
+                + ", ".join(apps.TERMINALS) + "); set \"terminal_bin\" or install one")
     # The command is a fixed vector plus a validated name; the user types their
     # own password in the terminal, hyprwhispr never handles it.
     subprocess.Popen(
-        [terminal, "-T", "Install package", "-e", "sudo", "dnf", "install", "-y", package],
+        [terminal.program, "-T", "Install package", "-e", "sudo", "dnf", "install", "-y", package],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )

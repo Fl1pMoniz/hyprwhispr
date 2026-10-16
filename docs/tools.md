@@ -15,7 +15,7 @@ and duration; arguments only when `log_tool_args` is enabled).
 | `list_steam_games` | `query?` | list installed Steam games |
 | `close_app` | `app` | close an app/game's windows gracefully |
 | `launch_opencode` | `prompt?` | open OpenCode in a terminal (optionally pre-fill a prompt) |
-| `web_search` | `query` | open a browser search (network; see below) |
+| `web_search` | `query` | open a browser search (network; browser discovered, see below) |
 | `save_note` | `text` | append to the local notes file |
 | `list_notes` | `query?` | search local notes |
 | `remember` | `key`, `value` | persist a preference |
@@ -63,6 +63,29 @@ Launching uses `gtk-launch` (which honours flatpak apps and `Terminal=true`).
 Closing focuses the matching window and asks the compositor to close it
 (`hl.dsp.window.close()`), falling back to a graceful `SIGTERM` for windows that
 ignore the request.
+
+## Program discovery (never assume a program exists)
+
+Before invoking an external program, hyprwhispr checks that it is actually
+available (`discovery.py`):
+
+* an explicit configured value is tried first (an absolute path is validated as
+  an executable file; a bare name is looked up on `PATH`);
+* otherwise a small, documented, ordered list of legitimate executable names is
+  tried;
+* `browser_bin` selects a preferred browser; without it the common browser names
+  are tried, then a generic opener (`xdg-open`/`gio`);
+* terminals fall back through `foot`, `alacritty`, `wezterm`, `konsole`,
+  `gnome-terminal`, ... when the configured `terminal_bin` is missing;
+* Steam and OpenCode are resolved the same way.
+
+Discovery is a **capability check only**. Finding a program is separate from being
+allowed to run it: every call still goes through the normal tool path, and the
+confirmation gate is untouched. Lookups never scan the filesystem, launch nothing,
+and never use a shell (URLs/paths are passed as separate argv elements). A short
+lived, bounded cache avoids repeating the same lookup within one action. When
+nothing is available the tool returns a clear `error:` explaining what to install
+or configure; it never reports success because a program was merely found.
 
 ## Ambiguity and context
 

@@ -25,13 +25,38 @@ environment variables:
 | `ollama_url` | `http://127.0.0.1:11434` | local Ollama server (keep it on loopback) |
 | `model` | `qwen3:4b` | model name (see `hyprwhispr model`) |
 | `model_aliases` | `{"small": "qwen3:4b", "large": "qwen3:8b"}` | names accepted by `hyprwhispr model <alias>` |
-| `keep_alive` | `5m` | how long Ollama keeps the model in VRAM after a turn |
+| `keep_alive` | `5m` | how long Ollama keeps the model in memory/VRAM after a turn. Set it with `hyprwhispr model keep-alive <auto\|always\|0\|10m>`; `-1` keeps it loaded until changed |
 | `num_ctx` | `4096` | context window |
 | `temperature` | `0.3` | sampling temperature |
 | `max_tokens` | `null` | optional cap on generated tokens per reply (Ollama `num_predict`); `null` = no cap. Bounds worst-case latency but can truncate and hurt tool selection at low values - test with `scripts/benchmark.py` first |
 | `request_timeout` | `120` | seconds allowed per model request |
 | `max_tool_steps` | `5` | agent-loop iterations before the model is forced to answer |
 | `tool_mode` | `auto` | `auto` (native function calling, JSON fallback), `native`, or `json` |
+
+## Model lifetime and memory
+
+Ollama keeps a model in memory for `keep_alive` after the last use. hyprwhispr
+exposes this policy with one setting and a few commands:
+
+```
+hyprwhispr model status              # model, policy, and whether it is loaded
+hyprwhispr model keep-alive auto     # unload after 5m idle (default)
+hyprwhispr model keep-alive always   # stay loaded until changed or unloaded
+hyprwhispr model keep-alive 10m      # unload after 10m idle
+hyprwhispr model unload              # release the model's memory now
+```
+
+Trade-off: keeping the model loaded removes the reload latency from the next
+request but consumes RAM/VRAM the whole time it is idle. `unload` asks Ollama to
+drop the model (`keep_alive: 0`) and checks `/api/ps`; it never stops the Ollama
+service and never deletes weights. Whether memory is actually reclaimed depends on
+the Ollama version, backend and GPU driver, so `model status` shows the size
+Ollama *reports* as observed information, not a promise.
+
+A policy of `0` is applied **after the whole turn finishes** - including any tool
+calls and follow-up model requests - never between an intermediate request and the
+next one, so a multi-step turn never reloads the model mid-way. A non-zero policy
+(`5m`, `10m`, `always`) keeps the model warm between turns.
 
 ## Speech recognition
 
@@ -78,6 +103,7 @@ Portuguese recording yields a Portuguese transcript.
 |---|---|---|
 | `history_turns` | `6` | user+assistant turns kept for the model |
 | `session_ttl_minutes` | `30` | context is forgotten after this idle time |
+| `action_history` | `8` | recent tool calls remembered in the session (for follow-ups and truthfulness) |
 | `app_ambiguity_margin` | `150` | score gap below which app matches are treated as ambiguous |
 
 ## Integrations
@@ -85,9 +111,10 @@ Portuguese recording yields a Portuguese transcript.
 | Key | Default | Meaning |
 |---|---|---|
 | `apps` | small map | launch aliases (e.g. `"terminal": "kitty"`) checked before auto-discovery |
+| `browser_bin` | `""` (auto) | preferred browser executable (name or absolute path). Empty = detect a common browser on `PATH`, then fall back to `xdg-open`/`gio` |
 | `search_url` | `https://duckduckgo.com/?q=` | web-search prefix (e.g. Google, SearXNG) |
 | `opencode_bin` | `opencode` | path to the OpenCode executable |
-| `terminal_bin` | `kitty` | terminal used for OpenCode and installs |
+| `terminal_bin` | `kitty` | preferred terminal emulator (falls back to `foot`, `alacritty`, `wezterm`, `konsole`, ...) |
 | `tool_timeout` | `60` | seconds allowed for a confirmed shell command |
 
 ## Privacy / logging
@@ -132,12 +159,18 @@ to the CPU and shorten `keep_alive` so the model unloads sooner when idle.
 
 Each push-to-talk recording starts a fresh worker, so context is kept in a small
 bounded JSON file (`<data>/state/session.json`) that expires after
-`session_ttl_minutes`. Inspect or clear it with:
+`session_ttl_minutes`. It holds the recent user/assistant turns, the most recently
+referenced target (with a timestamp, so the model is told it may be stale), and a
+bounded log of recent tool calls and their outcomes (`action_history`). Inspect or
+clear it with:
 
 ```
 hyprwhispr session
 hyprwhispr session clear
 ```
 
-Persistent preferences and notes are separate and permanent (see
-`docs/tools.md`).
+Only *relevant* persistent preferences are added to a prompt
+(`memory.relevant_context`), so a large preferences file does not flood every
+request. Persistent preferences and notes are separate and permanent (see
+`docs/tools.md`). Sensitive tool arguments (shell commands, package names, file
+paths) are recorded as status only, never as text.

@@ -8,6 +8,7 @@ interactive testing (``ask``, ``transcribe``, ``listen``) and management
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ import time
 from pathlib import Path
 
 from . import apps, audio, config, session, speech, wakeword
-from .llm import run_pipeline
+from .llm import loaded_models, run_pipeline, unload_model
 from .notify import log_event, notify
 
 USAGE = """\
@@ -60,7 +61,11 @@ Activation (optional wake word; disabled by default):
 Setup:
   list-mics                 show audio input devices
   mictest [seconds]         record and report the input level
-  model [small|large|name]  show or set the model
+  model                     show the model and its memory policy (alias: status)
+  model status              show model, lifetime policy and loaded state
+  model <small|large|name>  set the model
+  model keep-alive <policy> auto | always | 0 | 10m (how long Ollama keeps it)
+  model unload              release the model's memory now
   version                   print the version
 """
 
@@ -97,7 +102,25 @@ def _run_turn(cfg: dict, text: str) -> str:
     state = session.load(cfg)
     answer = run_pipeline(cfg, text, state=state)
     session.save(cfg, state)
+    _unload_after_turn(cfg)
     return answer
+
+
+def _unload_after_turn(cfg: dict) -> None:
+    """Honour an "unload after each turn" policy once the whole turn is finished.
+
+    Best effort: skipped while a recording is in progress, and it only ever runs
+    after ``run_pipeline`` (all LLM requests and tool calls) has returned. If two
+    turns ran concurrently, one could release the model while another is
+    mid-turn; that only costs a reload and never interrupts a request. A non-zero
+    keep-alive policy avoids the situation entirely.
+    """
+    if not config.keep_alive_is_unload(cfg.get("keep_alive")):
+        return
+    if _recording_active():
+        return
+    ok, error = unload_model(cfg)
+    log_event({"event": "model_unload_after_turn", "ok": ok, "error": error})
 
 
 def _answer_text(cfg: dict, text: str) -> None:
@@ -268,6 +291,119 @@ def wake_word_command(cfg: dict, rest: list[str]) -> int:
     return 2
 
 
+def _recording_active() -> bool:
+    """Best-effort check: is a push-to-talk recording in progress right now?"""
+    try:
+        pid = int(config.PIDFILE.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _same_model(name: str, model: str) -> bool:
+    """Compare Ollama model names, ignoring an implicit ':latest' tag."""
+    def base(text: str) -> str:
+        return (text or "").split(":", 1)[0].strip().lower()
+
+    return bool(name) and base(name) == base(model)
+
+
+def _human_bytes(value: object) -> str:
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return ""
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(size) < 1024 or unit == "TiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return ""
+
+
+def _model_status(cfg: dict) -> int:
+    model = cfg["model"]
+    policy = cfg.get("keep_alive", config.KEEP_ALIVE_DEFAULT)
+    print(f"model: {model}")
+    print(f"keep-alive policy: {config.keep_alive_policy(policy)}")
+    loaded = loaded_models(cfg)
+    if loaded is None:
+        print("ollama: not reachable - is it running? (https://ollama.com)")
+        return 1
+    match = next((m for m in loaded if _same_model(m.get("name", ""), model)), None)
+    if not match:
+        print("loaded: no")
+        if loaded:
+            print("other models loaded: " + ", ".join(m["name"] for m in loaded if m.get("name")))
+        return 0
+    size = _human_bytes(match.get("size_vram") or match.get("size"))
+    print("loaded: yes" + (f" ({size} in memory, observed - not a guarantee)" if size else ""))
+    if match.get("expires_at"):
+        print(f"expires: {match['expires_at']}")
+    return 0
+
+
+def _model_unload(cfg: dict) -> int:
+    model = cfg["model"]
+    if _recording_active():
+        print("warning: a recording is in progress; retry after the current turn completes.")
+        return 1
+    ok, error = unload_model(cfg, model)
+    if not ok:
+        print(f"error: could not unload '{model}': {error}")
+        return 1
+    loaded = loaded_models(cfg)
+    if loaded is None:
+        print(f"requested unload of '{model}', but the Ollama API was not reachable to confirm it.")
+        return 1
+    if any(_same_model(m.get("name", ""), model) for m in loaded):
+        print(f"'{model}' is still loaded (Ollama may need a moment, or it was just used).")
+        return 1
+    print(f"unloaded '{model}'.")
+    print("note: actual memory reclamation depends on the Ollama version, backend and GPU driver:")
+    print("      this confirms the API-level unload, not observed VRAM release.")
+    return 0
+
+
+def model_command(cfg: dict, rest: list[str]) -> int:
+    """Show or change the model and its Ollama memory-lifetime policy."""
+    sub = rest[0] if rest else None
+    if sub in (None, "status"):
+        return _model_status(cfg)
+
+    if sub in ("keep-alive", "keep_alive", "keepalive", "lifetime"):
+        if len(rest) < 2:
+            print("usage: hyprwhispr model keep-alive <auto|always|0|10m>")
+            return 2
+        value, error = config.validate_keep_alive(rest[1])
+        if error:
+            print(f"error: {error}")
+            return 2
+        cfg["keep_alive"] = value
+        config.save_config(cfg)
+        print(f"keep-alive set to {value!r} ({config.keep_alive_policy(value)})")
+        if value == "-1":
+            print("note: the model now stays loaded while idle and keeps using memory until "
+                  "you unload it or change this policy.")
+        return 0
+
+    if sub == "unload":
+        return _model_unload(cfg)
+
+    # Any other first argument is a model alias or name (existing behaviour).
+    aliases = cfg.get("model_aliases", {"small": "qwen3:4b", "large": "qwen3:8b"})
+    chosen = aliases.get(sub, sub)
+    cfg["model"] = chosen
+    config.save_config(cfg)
+    print(f"model set to {chosen}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -343,15 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         return wake_word_command(cfg, rest)
 
     if command == "model":
-        if rest:
-            aliases = cfg.get("model_aliases", {"small": "qwen3:4b", "large": "qwen3:8b"})
-            chosen = aliases.get(rest[0], rest[0])
-            cfg["model"] = chosen
-            config.save_config(cfg)
-            print(f"model set to {chosen}")
-        else:
-            print(f"current model: {cfg['model']}  (num_ctx={cfg['num_ctx']}, keep_alive={cfg.get('keep_alive')})")
-        return 0
+        return model_command(cfg, rest)
     if command in ("version", "-v", "--version"):
         print(f"hyprwhispr {config.VERSION}")
         return 0

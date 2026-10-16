@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import apps, memory, session, tools
+from . import apps, config, memory, session, tools
 from .notify import log_event
 
 SYSTEM_PROMPT = (
@@ -50,6 +50,11 @@ SYSTEM_PROMPT = (
     "Use the conversation context for references like 'it', 'that app' or 'the "
     "previous one'. If the target is genuinely unclear, ask one short question "
     "listing the concrete options instead of guessing.\n"
+    "A 'Recent actions' note lists what you already did this conversation and "
+    "whether each call succeeded: trust it, do not repeat an action that already "
+    "succeeded, and never describe a failed action as done. A remembered target "
+    "may have been closed since it was referenced; base any claim on a fresh tool "
+    "result, not on the memory alone.\n"
     "If a tool result starts with 'ambiguous:' it lists the candidates; ask the user "
     "which one they mean and do not act.\n"
     "Never claim an app opened, a process closed or a file changed unless a tool "
@@ -73,6 +78,65 @@ def http_json(url: str, payload: dict, timeout: int = 120) -> dict:
     request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode())
+
+
+def http_get_json(url: str, timeout: int = 10) -> dict:
+    """A non-streaming GET that returns parsed JSON (used for ``/api/ps``)."""
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode())
+
+
+def loaded_models(cfg: dict) -> list[dict] | None:
+    """Currently loaded models from Ollama's ``/api/ps``.
+
+    Returns ``None`` when the server cannot be reached (so callers can tell
+    "not loaded" apart from "unknown"), otherwise a list of ``{name, size,
+    size_vram, expires_at}`` dicts. Sizes are *observed* values, not guarantees.
+    """
+    url = cfg["ollama_url"].rstrip("/") + "/api/ps"
+    try:
+        data = http_get_json(url, timeout=int(cfg.get("ps_timeout", 8)))
+    except Exception:  # noqa: BLE001 - unreachable server is a normal state
+        return None
+    models = data.get("models")
+    if not isinstance(models, list):
+        return []
+    result = []
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        result.append({
+            "name": item.get("name") or item.get("model") or "",
+            "size": item.get("size"),
+            "size_vram": item.get("size_vram"),
+            "expires_at": item.get("expires_at"),
+        })
+    return result
+
+
+def unload_model(cfg: dict, model: str | None = None) -> tuple[bool, str | None]:
+    """Ask Ollama to release *model* now. Returns ``(ok, error)``.
+
+    Ollama unloads a model when a request carries ``keep_alive: 0``; this does
+    **not** stop the Ollama server or delete any weights. Whether the memory is
+    actually reclaimed depends on the Ollama version, backend and driver, so
+    callers should verify with :func:`loaded_models` rather than assume.
+    """
+    model = model or cfg.get("model")
+    if not model:
+        return False, "no model selected"
+    url = cfg["ollama_url"].rstrip("/") + "/api/generate"
+    payload = {"model": model, "prompt": "", "keep_alive": 0, "stream": False}
+    try:
+        http_json(url, payload, timeout=int(cfg.get("unload_timeout", 30)))
+    except urllib.error.HTTPError as exc:
+        return False, f"Ollama returned HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return False, f"Ollama is not reachable ({exc.reason})"
+    except Exception as exc:  # noqa: BLE001 - report, never crash the CLI
+        return False, f"unload request failed: {exc}"
+    return True, None
 
 
 def ollama_chat(cfg: dict, messages: list, tools_schema: list | None = None) -> dict:
@@ -227,12 +291,15 @@ def _build_messages(cfg: dict, text: str, state: dict) -> list[dict]:
     if aliases:
         messages.append({"role": "system", "content":
                          "Configured app aliases you may pass to open_app: " + ", ".join(aliases) + "."})
-    facts = memory.memory_context()
+    facts = memory.relevant_context(text)
     if facts:
         messages.append({"role": "system", "content": facts})
     context = session.entity_context(state)
     if context:
         messages.append({"role": "system", "content": context})
+    activity = session.activity_context(state)
+    if activity:
+        messages.append({"role": "system", "content": activity})
     if cfg.get("tool_mode") == "json":
         messages.append({"role": "system", "content": JSON_TOOL_INSTRUCTION + ", ".join(tools.TOOL_IMPL)})
     messages += session.history_messages(state, int(cfg.get("history_turns", 6)))
@@ -330,6 +397,11 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
     session.append_turn(state, "user", text, history_limit)
     session.clear_pending(state)  # the context above already carried any pending choices
 
+    # Never send keep_alive=0 on an in-turn request: it could unload the model
+    # between a tool call and the next inference. The caller applies an
+    # "unload after turn" policy once the whole turn is finished.
+    request_cfg = {**cfg, "keep_alive": config.turn_keep_alive(cfg.get("keep_alive"))}
+
     use_tools = mode != "json"
     seen_calls: set[tuple] = set()
     results: list[str] = []
@@ -348,7 +420,7 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
         nonlocal llm_total, llm_calls, llm_prompt_tokens, llm_eval_tokens, llm_load_ms
         started = time.perf_counter()
         try:
-            response = ollama_chat(cfg, msgs, schema)
+            response = ollama_chat(request_cfg, msgs, schema)
         finally:
             elapsed = time.perf_counter() - started
             llm_total += elapsed
@@ -385,7 +457,7 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
             calls = parse_tool_json(content)
 
         if not calls:
-            answer, extra_ms, extra_calls = _final_answer(cfg, messages, content, results)
+            answer, extra_ms, extra_calls = _final_answer(request_cfg, messages, content, results)
             if extra_calls:
                 llm_total += extra_ms / 1000
                 llm_calls += extra_calls
@@ -409,6 +481,7 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
             result = str(tools.dispatch_tool(cfg, name, arguments))
             tool_total += time.perf_counter() - call_started
             session.note_tool(state, name, arguments, result)
+            session.record_action(state, name, arguments, result, int(cfg.get("action_history", 8)))
             if result.startswith(apps.AMBIGUOUS_PREFIX):
                 session.set_pending(state, apps.parse_ambiguous(result))
             results.append(result)
@@ -417,7 +490,7 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
 
     # Budget exhausted: ask for an answer without tools so we never stall.
     final = _chat(messages, None)
-    answer, extra_ms, extra_calls = _final_answer(cfg, messages, final.get("message", {}).get("content") or "", results)
+    answer, extra_ms, extra_calls = _final_answer(request_cfg, messages, final.get("message", {}).get("content") or "", results)
     if extra_calls:
         llm_total += extra_ms / 1000
         llm_calls += extra_calls

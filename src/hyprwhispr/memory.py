@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 
 from . import config
 from .validation import args_ok
@@ -32,6 +33,41 @@ def memory_context() -> str:
     if not prefs:
         return ""
     lines = "\n".join(f"- {key}: {value}" for key, value in prefs.items())
+    return "Facts you already remember about the user (use them, do not re-ask):\n" + lines
+
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", str(text).lower()) if len(w) > 2}
+
+
+def relevant_context(query: str, limit: int = 8) -> str:
+    """Like :func:`memory_context`, but selects relevant preferences only.
+
+    The mechanism is deliberately small and explainable. When there are few
+    preferences they are all included (so behaviour is unchanged for typical
+    users). With many preferences, only those whose key or value shares a token
+    with the current request are injected, so an unrelated request does not drag
+    every stored fact into the prompt. If nothing matches, the highest-scoring
+    preferences are still included, bounded by *limit*, so the model is never
+    left unaware of a globally useful preference.
+    """
+    prefs = load_preferences()
+    if not prefs:
+        return ""
+    items = list(prefs.items())
+    if len(items) <= limit:
+        selected = items
+    else:
+        wanted = _tokens(query)
+
+        def overlap(item: tuple[str, object]) -> int:
+            key, value = item
+            return len(wanted & (_tokens(key) | _tokens(str(value))))
+
+        ranked = sorted(items, key=overlap, reverse=True)
+        matched = [item for item in ranked if overlap(item) > 0][:limit]
+        selected = matched or ranked[:limit]
+    lines = "\n".join(f"- {key}: {value}" for key, value in selected)
     return "Facts you already remember about the user (use them, do not re-ask):\n" + lines
 
 

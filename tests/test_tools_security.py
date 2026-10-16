@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hyprwhispr import apps, config, system_actions, web
+from hyprwhispr import apps, browsers, config, discovery, system_actions, web
 
 
 class Recorder:
@@ -71,10 +71,22 @@ def test_install_package_rejects_metacharacters(monkeypatch):
 
 def test_install_package_launches_dnf_when_approved(monkeypatch):
     monkeypatch.setattr(system_actions, "confirm", lambda *a, **k: True)
+    monkeypatch.setattr(apps, "resolve_terminal",
+                        lambda cfg: discovery.Resolution(program="/usr/bin/kitty", source="path"))
     rec = Recorder()
     monkeypatch.setattr(system_actions.subprocess, "Popen", rec.Popen)
     system_actions.tool_install_package(_cfg(), "htop")
     assert any(call[0] == "Popen" and "dnf" in call[1] and "sudo" in call[1] for call in rec.calls)
+
+
+def test_install_package_reports_missing_terminal(monkeypatch):
+    monkeypatch.setattr(system_actions, "confirm", lambda *a, **k: True)
+    monkeypatch.setattr(apps, "resolve_terminal", lambda cfg: discovery.Resolution(source="none"))
+    rec = Recorder()
+    monkeypatch.setattr(system_actions.subprocess, "Popen", rec.Popen)
+    result = system_actions.tool_install_package(_cfg(), "htop")
+    assert result.startswith("error:") and "terminal" in result
+    assert rec.calls == []
 
 
 # --- delete_path -------------------------------------------------------------
@@ -132,12 +144,24 @@ def test_open_app_uses_configured_alias(monkeypatch):
 
 def test_web_search_url_encodes_query(monkeypatch):
     rec = Recorder()
-    monkeypatch.setattr(web.subprocess, "Popen", rec.Popen)
+    monkeypatch.setattr(browsers.subprocess, "Popen", rec.Popen)
     monkeypatch.setattr(web, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(browsers, "select_browser",
+                        lambda cfg, use_cache=True: discovery.Resolution(
+                            program="firefox", source="path", label="Firefox"))
     cfg = _cfg()
     cfg["search_url"] = "https://example.com/?q="
     web.tool_web_search(cfg, "a b&c")
     assert any(call[0] == "Popen" and "a+b%26c" in call[1][1] for call in rec.calls)
+
+
+def test_web_search_reports_missing_browser(monkeypatch):
+    cfg = _cfg()
+    cfg["browser_bin"] = ""
+    monkeypatch.setattr(browsers, "select_browser",
+                        lambda cfg, use_cache=True: discovery.Resolution(source="none", tried=("firefox",)))
+    result = web.tool_web_search(cfg, "anything")
+    assert result.startswith("error:") and "browser" in result.lower()
 
 
 # --- local-first default -----------------------------------------------------

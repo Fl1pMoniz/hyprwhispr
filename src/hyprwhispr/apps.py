@@ -23,7 +23,7 @@ import subprocess
 import time
 import unicodedata
 
-from . import config
+from . import browsers, config, discovery
 from .notify import log_event, notify
 from .permissions import confirm
 from .validation import args_ok, non_empty
@@ -31,6 +31,13 @@ from .validation import args_ok, non_empty
 #: A match at or above this score (exact name, name prefix, exact desktop id) is
 #: trusted without asking; weaker matches must be unambiguous or we ask.
 CONFIDENT_SCORE = 600
+
+#: Common terminal emulators, most preferred first. Used when a desktop entry
+#: needs a terminal, when launching OpenCode, or when closing a terminal app.
+TERMINALS = [
+    "kitty", "foot", "alacritty", "wezterm", "konsole",
+    "gnome-terminal", "xfce4-terminal", "tilix", "xterm",
+]
 
 _HOME = pathlib.Path.home()
 
@@ -222,39 +229,88 @@ def _clean_query(query: str) -> tuple[str, list[str]]:
     return (" ".join(tokens) if tokens else normalized), tokens
 
 
-def _match_configured(configured: dict[str, str], query: str) -> str | None:
-    """Return a configured launcher whose key matches the query (exact or token)."""
+def _match_configured(configured: dict[str, str], query: str) -> tuple[str | None, str | None]:
+    """Return ``(key, command)`` of a configured launcher matching the query."""
     normalized = normalize(query)
     if normalized in configured:
-        return configured[normalized]
+        return normalized, configured[normalized]
     query_tokens = set(normalized.split())
     for key, command in configured.items():
         if key and (key in query_tokens or any(tok in key.split() for tok in query_tokens)):
-            return command
+            return key, command
+    return None, None
+
+
+def _program_available(program: str) -> bool:
+    """True when *program* is an executable path or resolves on ``PATH``."""
+    program = (program or "").strip()
+    if not program:
+        return False
+    if os.sep in program:
+        return discovery.is_executable_file(program)
+    return shutil.which(program) is not None
+
+
+def resolve_terminal(cfg: dict) -> discovery.Resolution:
+    """Find a usable terminal emulator (configured first, then common ones)."""
+    configured = str(cfg.get("terminal_bin") or "").strip()
+    return discovery.resolve_program(TERMINALS, configured, use_cache=False)
+
+
+def _is_browser_alias(key: str | None) -> bool:
+    return bool(key) and "browser" in key.split()
+
+
+def _url_from_argv(argv: list[str]) -> str | None:
+    for token in argv:
+        if isinstance(token, str) and token.startswith(("http://", "https://")):
+            return token
     return None
 
 
-def launch_desktop(cfg: dict, entry: dict) -> None:
+def _steam_program(cfg: dict) -> str | None:
+    return shutil.which("steam")
+
+
+def launch_desktop(cfg: dict, entry: dict) -> str:
+    """Launch a desktop entry, returning its display name on success.
+
+    Raises ``RuntimeError`` with an actionable message when the launcher cannot
+    be started (missing gtk-launch, no Exec line, or a missing absolute
+    executable), so the caller never reports a launch that did not happen.
+    """
     if shutil.which("gtk-launch"):
-        proc = subprocess.Popen(
-            ["gtk-launch", entry["id"]],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        try:
+            proc = subprocess.Popen(
+                ["gtk-launch", entry["id"]],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"gtk-launch could not start: {exc}") from exc
         try:
             returncode = proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             returncode = 0
         if returncode == 0:
-            return
+            return entry.get("name", entry["id"])
     argv = _exec_argv(entry.get("exec", ""))
     if not argv:
         raise RuntimeError("no Exec line and gtk-launch failed")
+    first = argv[0]
+    if os.sep in first and not discovery.is_executable_file(first):
+        raise RuntimeError(f"the program in the desktop entry is missing: {first}")
     if entry.get("terminal"):
-        term = shutil.which(cfg["terminal_bin"]) or "kitty"
-        argv = [term, "-e"] + argv
-    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+        terminal = resolve_terminal(cfg)
+        if not terminal.found:
+            raise RuntimeError("no terminal emulator is installed")
+        argv = [terminal.program, "-e"] + argv
+    try:
+        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not launch {first}: {exc}") from exc
+    return entry.get("name", entry["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +405,15 @@ def resolve_game(index: dict, query: str) -> dict | None:
 
 
 def launch_steam_game(cfg: dict, game: dict) -> None:
-    steam = shutil.which("steam") or "steam"
-    subprocess.Popen([steam, f"steam://rungameid/{game['appid']}"],
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    steam = _steam_program(cfg)
+    if not steam:
+        raise RuntimeError("Steam is not installed or not on PATH")
+    try:
+        subprocess.Popen([steam, f"steam://rungameid/{game['appid']}"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        raise RuntimeError(f"could not start Steam: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -421,14 +482,28 @@ def tool_open_app(cfg: dict, app: str) -> str:
     if not non_empty(app, 120):
         return "error: no application name was provided; ask the user which app to open"
     configured = {normalize(k): v for k, v in cfg["apps"].items()}
-    command = _match_configured(configured, app)
+    key, command = _match_configured(configured, app)
     if command:
         cmd = shlex.split(command)
-        if not shutil.which(cmd[0]):
-            return f"error: launcher '{cmd[0]}' not found"
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
-        return f"opened {app}"
+        program = cmd[0] if cmd else ""
+        if _program_available(program):
+            try:
+                subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError as exc:
+                return f"error: could not launch '{program}': {exc}"
+            return f"opened {app}"
+        # The configured launcher is missing. For a browser alias, fall back to a
+        # discovered browser; otherwise report the problem explicitly.
+        if _is_browser_alias(key):
+            resolution = browsers.select_browser(cfg)
+            if resolution.found:
+                url = _url_from_argv(cmd) or cfg.get("search_url", "").split("?", 1)[0] or "about:blank"
+                result = browsers.launch_url(cfg, url, browser=resolution)
+                if not result.startswith("error"):
+                    return f"opened {app} with {resolution.label or resolution.program}"
+            return browsers.no_browser_message(resolution)
+        return f"error: configured launcher '{program}' for '{key}' was not found on PATH"
 
     app_candidates = resolve_app_candidates(load_app_index(cfg), app)
     game_candidates = resolve_game_candidates(load_steam_games(cfg), app)
@@ -437,12 +512,20 @@ def tool_open_app(cfg: dict, app: str) -> str:
 
     if best_app and (best_game is None or best_app[0] >= best_game[0]):
         if _is_confident(best_app[0], app_candidates, cfg):
-            launch_desktop(cfg, best_app[1])
+            try:
+                launch_desktop(cfg, best_app[1])
+            except RuntimeError as exc:
+                return f"error: {exc}"
             return f"opened {best_app[1]['name']}"
         return _ambiguous_result("applications", app, app_candidates)
     if best_game:
         if _is_confident(best_game[0], game_candidates, cfg):
-            launch_steam_game(cfg, best_game[1])
+            if not _steam_program(cfg):
+                return "error: Steam is not installed or not on PATH"
+            try:
+                launch_steam_game(cfg, best_game[1])
+            except RuntimeError as exc:
+                return f"error: {exc}"
             return f"launched the Steam game {best_game[1]['name']}"
         return _ambiguous_result("Steam games", app, game_candidates)
     return f"error: no installed app or Steam game matches '{app}'"
@@ -479,7 +562,12 @@ def tool_launch_steam_game(cfg: dict, game: str) -> str:
         return f"error: no installed Steam game matches '{game}'"
     if not _is_confident(candidates[0][0], candidates, cfg):
         return _ambiguous_result("Steam games", game, candidates)
-    launch_steam_game(cfg, candidates[0][1])
+    if not _steam_program(cfg):
+        return "error: Steam is not installed or not on PATH"
+    try:
+        launch_steam_game(cfg, candidates[0][1])
+    except RuntimeError as exc:
+        return f"error: {exc}"
     return f"launching the Steam game {candidates[0][1]['name']}"
 
 
@@ -544,7 +632,7 @@ def tool_close_app(cfg: dict, app: str) -> str:
         argv = _exec_argv(app_entry.get("exec", ""))
         if argv:
             program = pathlib.Path(argv[0]).name
-    if program:
+    if program and shutil.which("pgrep") and shutil.which("pkill"):
         pids = subprocess.run(["pgrep", "-x", program], capture_output=True, text=True,
                               check=False).stdout.split()
         if pids and confirm(f"'{app}' has no window. Send SIGTERM to process '{program}' (pids {', '.join(pids)})?"):
@@ -572,10 +660,14 @@ def tool_resolve(cfg: dict, query: str) -> str:
 
 def tool_launch_opencode(cfg: dict, prompt: str = "") -> str:
     """Open the OpenCode coding agent in a terminal, optionally pre-filling a prompt."""
-    terminal = shutil.which(cfg["terminal_bin"]) or cfg["terminal_bin"]
-    opencode = cfg["opencode_bin"]
-    if not pathlib.Path(opencode).exists():
-        opencode = shutil.which("opencode") or "opencode"
+    terminal = resolve_terminal(cfg)
+    if not terminal.found:
+        return ("error: no terminal emulator is installed (tried "
+                + ", ".join(TERMINALS) + "); set \"terminal_bin\" in your configuration")
+    opencode = discovery.resolve_program(["opencode"], str(cfg.get("opencode_bin") or "").strip())
+    if not opencode.found:
+        return ("error: OpenCode was not found on PATH; install it or set "
+                "\"opencode_bin\" in your configuration")
     if prompt and args_ok(prompt, 4000):
         config.NOTES_DIR.mkdir(parents=True, exist_ok=True)
         with (config.NOTES_DIR / "opencode-prompts.md").open("a") as fh:
@@ -583,7 +675,10 @@ def tool_launch_opencode(cfg: dict, prompt: str = "") -> str:
         if shutil.which("wl-copy"):
             subprocess.run(["wl-copy", prompt], check=False)
         notify("OpenCode", "Prepared prompt copied to your clipboard and saved to notes.", timeout=6000)
-    subprocess.Popen([terminal, "-T", "OpenCode", "-e", opencode],
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        subprocess.Popen([terminal.program, "-T", "OpenCode", "-e", opencode.program],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as exc:
+        return f"error: could not open OpenCode: {exc}"
     return "opened OpenCode in a new terminal window"

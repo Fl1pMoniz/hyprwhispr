@@ -21,9 +21,14 @@ import datetime
 import json
 import os
 import pathlib
+import re
 
 APP_NAME = "hyprwhispr"
 VERSION = "1.1.0"
+
+#: Effective ``keep_alive`` used when the user selects the "auto" policy.
+KEEP_ALIVE_DEFAULT = "5m"
+_KEEP_ALIVE_RE = re.compile(r"^\d+(s|m|h)$")
 
 HOME = pathlib.Path.home()
 
@@ -95,6 +100,7 @@ DEFAULTS = {
     # --- conversation context ---
     "history_turns": 6,            # user+assistant turns kept for the model
     "session_ttl_minutes": 30,     # context is forgotten after this idle time
+    "action_history": 8,           # recent tool calls remembered for follow-ups
     "app_ambiguity_margin": 150,   # score gap below which app matches are ambiguous
     # --- integrations ---
     "apps": {
@@ -104,6 +110,9 @@ DEFAULTS = {
         "editor": "kitty -e nvim",
     },
     "search_url": "https://duckduckgo.com/?q=",
+    # Preferred browser executable (name or absolute path). Empty = auto-detect a
+    # common browser on PATH, falling back to xdg-open/gio when none is found.
+    "browser_bin": "",
     "opencode_bin": "opencode",
     "terminal_bin": "kitty",
     "tool_timeout": 60,            # seconds for a confirmed shell command
@@ -157,3 +166,67 @@ def save_config(cfg: dict, path: pathlib.Path | None = None) -> None:
 
 def now() -> str:
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def validate_keep_alive(raw: object) -> tuple[str | None, str | None]:
+    """Normalise a user-supplied model-lifetime policy to an Ollama value.
+
+    Returns ``(value, error)``. Accepted inputs:
+
+    * ``"auto"`` (or empty)  -> the five-minute idle default (``"5m"``)
+    * ``"always"``           -> ``"-1"`` (stay loaded until changed)
+    * ``"0"`` / ``"none"``   -> ``"0"`` (release as soon as the current turn ends)
+    * an explicit duration   -> passed through, e.g. ``"30s"``, ``"10m"``, ``"1h"``
+
+    Only shape is validated here; Ollama applies the value.
+    """
+    if isinstance(raw, bool):
+        return None, "keep-alive must be 'auto', 'always', '0' or a duration like '10m'"
+    if isinstance(raw, (int, float)):
+        raw = str(raw)
+    if not isinstance(raw, str):
+        return None, "keep-alive must be 'auto', 'always', '0' or a duration like '10m'"
+    value = raw.strip().lower()
+    if value in ("", "auto", "default"):
+        return KEEP_ALIVE_DEFAULT, None
+    if value in ("always", "keep", "forever", "infinite"):
+        return "-1", None
+    if value in ("0", "none", "unload", "off"):
+        return "0", None
+    if value == "-1" or _KEEP_ALIVE_RE.match(value):
+        return value, None
+    return None, f"invalid keep-alive {raw!r}; use 'auto', 'always', '0' or a duration like '10m'"
+
+
+def keep_alive_policy(value: object) -> str:
+    """A short human label for an effective ``keep_alive`` value."""
+    text = str(value if value is not None else KEEP_ALIVE_DEFAULT).strip().lower()
+    if text in ("", "auto"):
+        text = KEEP_ALIVE_DEFAULT
+    if text == "-1":
+        return "always (stays loaded until changed or unloaded)"
+    if text == "0":
+        return "unload after each turn (released once the turn completes)"
+    return f"auto: unload after {text} idle"
+
+
+def keep_alive_is_unload(value: object) -> bool:
+    """True when the configured policy asks for release as soon as possible."""
+    return str(value if value is not None else "").strip().lower() in ("0", "none", "unload", "off")
+
+
+def turn_keep_alive(value: object) -> str:
+    """The ``keep_alive`` to send while a multi-step turn is in progress.
+
+    A turn can make several inference requests (tool call -> result -> follow-up).
+    Sending ``keep_alive=0`` on an intermediate request could let Ollama unload
+    the model between a tool call and the next inference. So during a turn we
+    always send a non-zero value; a policy of ``0`` is honoured by the caller
+    *after* the whole turn completes (see ``cli._run_turn``), not mid-turn.
+    """
+    if keep_alive_is_unload(value):
+        return KEEP_ALIVE_DEFAULT
+    text = str(value if value is not None else KEEP_ALIVE_DEFAULT).strip().lower()
+    if text in ("", "auto", "default"):
+        return KEEP_ALIVE_DEFAULT
+    return text

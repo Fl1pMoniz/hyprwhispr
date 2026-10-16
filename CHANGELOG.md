@@ -6,6 +6,35 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Program discovery before launching.** Browser opening and application,
+  terminal, Steam and OpenCode launches now verify that a suitable executable
+  exists (user-configured value first, then `PATH`, then a small documented
+  candidate list) rather than assuming a specific program. Adds the `browser_bin`
+  setting, returns clear structured errors when nothing is available, and never
+  routes launches through a shell. Discovery is a capability check only - the
+  existing permission/confirmation gates are unchanged.
+- **Multi-step turns no longer risk unloading the model.** A `keep_alive` policy
+  of `0` is applied only after the whole turn finishes (tool calls and follow-up
+  inference included), never between an intermediate tool call and the next
+  request. A non-zero policy avoids cross-turn reloads entirely.
+- **`scripts/verify.sh` respects the effective configuration**: it checks the
+  configured `whisper_bin`/`whisper_model` (with a `PATH` fallback) instead of
+  only the default data-dir path - fixing a false "Whisper missing" report - and
+  additionally reports browser and terminal availability without running them.
+- **Better conversation context.** Tool calls and their real outcomes are now
+  persisted in the bounded session file (`session.record_action` /
+  `activity_context`), so a later worker process sees what was actually done -
+  including failures - instead of only the final reply. Remembered targets carry a
+  freshness note, and only *relevant* persistent preferences are injected per
+  request (`memory.relevant_context`) rather than every stored fact. The session
+  file stays backward compatible and sensitive tool arguments are not persisted.
+- **Model memory lifecycle.** New `hyprwhispr model status`,
+  `model keep-alive <auto|always|0|10m>` and `model unload` commands. The policy
+  is validated (`config.validate_keep_alive`) and stored in the existing
+  `keep_alive` key (no second setting); `unload` asks Ollama to release the model
+  with `keep_alive: 0` and verifies it via `/api/ps` - it never stops the Ollama
+  server and never deletes weights. Model status reports the loaded state and
+  observed memory size (observed only, not a guarantee).
 - **Optional wake word** (disabled by default). Activation modes `shortcut`
   (default), `wake_word`, `both`, `disabled`; a configurable phrase stored verbatim
   with the exact Ukrainian default `дідько` (disabled; a mild, humorous curse); a pluggable detector interface with **two**

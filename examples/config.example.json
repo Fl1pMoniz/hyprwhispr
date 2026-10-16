@@ -20,6 +20,7 @@
   "keep_recordings": false,
   "history_turns": 6,
   "session_ttl_minutes": 30,
+  "action_history": 8,
   "app_ambiguity_margin": 150,
   "apps": {
     "terminal": "kitty",
@@ -28,6 +29,7 @@
     "editor": "kitty -e nvim"
   },
   "search_url": "https://duckduckgo.com/?q=",
+  "browser_bin": "",
   "opencode_bin": "opencode",
   "terminal_bin": "kitty",
   "tool_timeout": 60,

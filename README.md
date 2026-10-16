@@ -64,12 +64,20 @@ HyprWhispr is built to work in **Ukrainian**, not just English:
   by prose that merely mentions it), and leaked tool-call markup or JSON is
   stripped from replies, with a bounded retry if no user text remains.
 - **Conversation context** — follow-ups like "now close it" resolve against a
-  bounded, expiring local session (not a database).
+  bounded, expiring local session (not a database). Recent tool calls and their
+  real outcomes are remembered across the separate worker processes, remembered
+  targets carry a freshness note, and only relevant preferences are injected.
+- **Model memory controls** — keep the model warm, unload it after a configurable
+  idle time, keep it loaded, or release it on demand (`model ...`, see below).
 - **Ambiguity handling** — when several apps match, it asks instead of guessing,
   and remembers the choices for the next turn.
 - **Launch and close apps and Steam games** by name, discovered from your
   installed `.desktop` files and Steam library (no hard-coded allow-list).
 - **Web search** that opens your browser (the only feature that uses the network).
+- **Discovers programs instead of assuming them** — the browser, terminal, Steam
+  and OpenCode are resolved from your config, then `PATH`, then common names
+  (`browser_bin` picks a preferred browser); a missing program gives a clear
+  error instead of a failure, and discovery never bypasses the safety checks.
 - **Notes and preferences** stored locally as plain files.
 - **Confirmation gates** for shell commands, package installs and file deletion.
 - **Audit log** of tool name, status and duration, plus per-turn timing metrics
@@ -248,6 +256,8 @@ hyprwhispr ask "what is 2+2" # type instead of speaking
 hyprwhispr list-mics         # find your microphone
 hyprwhispr mictest           # check the input level
 hyprwhispr model small       # switch to the smaller model
+hyprwhispr model status      # model, memory policy and whether it is loaded
+hyprwhispr model unload      # release the model's memory now
 hyprwhispr apps firefox      # search installed apps
 hyprwhispr games hollow      # search installed Steam games
 hyprwhispr refresh-apps      # rebuild app/game indexes
@@ -267,6 +277,25 @@ These are **measurements on one machine** (NVIDIA RTX 4070 12 GB, `qwen3:4b`,
 
 Your numbers will differ with model, context size and driver. To reduce usage:
 `hyprwhispr model small`, `"whisper_gpu": false`, and a shorter `keep_alive`.
+
+### Model memory (keep-alive and unloading)
+
+The local model can either stay warm for fast follow-ups or be released when you
+are done. This is Ollama's `keep_alive`, exposed as one setting and three commands:
+
+```bash
+hyprwhispr model status              # model, policy, loaded state (via /api/ps)
+hyprwhispr model keep-alive auto     # unload after 5m idle (default)
+hyprwhispr model keep-alive always   # stay loaded (uses memory while idle)
+hyprwhispr model keep-alive 10m      # unload after 10m idle
+hyprwhispr model unload              # release the model's memory now
+```
+
+`unload` asks Ollama to drop the model and verifies it with `/api/ps`; it never
+stops the Ollama service and never deletes weights. Because memory reclamation
+depends on the Ollama version, backend and GPU driver, the reported size is
+*observed*, not a guarantee. Keeping the model loaded cuts the next request's
+latency but holds RAM/VRAM while idle.
 
 ### Latency
 
@@ -296,6 +325,23 @@ an optional lower-CPU openWakeWord engine is available for its supported English
 phrases. Details, licensing and accuracy caveats:
 [docs/wake-word.md](docs/wake-word.md).
 
+### Browsers and other programs
+
+HyprWhispr never assumes a specific browser, terminal or app exists. When it needs
+to launch one it resolves an executable: your configured value first, then `PATH`,
+then a short list of common names. If none is found it says so plainly instead of
+failing silently.
+
+- Browser: set `"browser_bin": "firefox"` (or any executable name/path) to choose
+  one; leave it empty to auto-detect, with `xdg-open`/`gio` as a last resort.
+- Terminal: `terminal_bin` (default `kitty`) falls back through `foot`,
+  `alacritty`, `wezterm`, `konsole`, `gnome-terminal`, ...
+- `scripts/verify.sh` reports which of these were found and checks your
+  configured `whisper_bin`/`whisper_model`, not just the default paths.
+
+Discovery only checks that a program exists; it never grants permission to run it,
+and all launches still use an argument vector (never a shell).
+
 ## Commands
 
 | Command                                        | Purpose                                      |
@@ -311,6 +357,8 @@ phrases. Details, licensing and accuracy caveats:
 | `refresh-apps`                                 | rebuild the app and Steam indexes            |
 | `list-mics` / `mictest`                        | microphone helpers                           |
 | `model [small\|large\|name]`                   | show or set the model                        |
+| `model status` / `model keep-alive <policy>`   | memory-lifetime policy and loaded state      |
+| `model unload`                                 | release the model's memory now               |
 | `version`                                      | print the version                            |
 
 Tools the model can call are documented in [`docs/tools.md`](docs/tools.md).

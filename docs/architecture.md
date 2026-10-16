@@ -43,6 +43,8 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
 | `speech.py` | whisper.cpp invocation, GPU→CPU fallback, transcript cleanup |
 | `llm.py` | Ollama client, agent loop, tool-call parsing/sanitisation, timing |
 | `tools.py` | the tool registry (JSON schemas) and `dispatch_tool` |
+| `discovery.py` | capability check: is a usable executable available (configured → PATH → candidates), with a short bounded cache |
+| `browsers.py` | browser discovery and safe URL opening (`browser_bin`, common browsers, `xdg-open`/`gio` fallback) |
 | `apps.py` | `.desktop` + Steam indexing, normalization, resolve/launch/close |
 | `memory.py` | notes and remembered preferences (persistent) |
 | `session.py` | bounded, expiring conversation context (temporary) |
@@ -65,8 +67,10 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
    CPU fallback on a GPU error; the transcript is cleaned and its temporary files
    are removed. The transcript is passed to the model unchanged.
 4. **Agent loop** (`llm.run_pipeline`): builds messages from the system prompt,
-   configured aliases, remembered preferences, recent conversation history and
-   the last referenced target, then repeatedly:
+   configured aliases, *relevant* remembered preferences (`memory.relevant_context`),
+   the last referenced target with a freshness note, a bounded log of recent tool
+   actions and their outcomes (`session.activity_context`), and recent
+   conversation history, then repeatedly:
    - asks the model (native function calling, or a strict JSON tool protocol),
    - if tools are requested, validates and executes them, feeding the **actual**
      results back,
@@ -102,6 +106,17 @@ worker logs a `pipeline_total`. All durations use a monotonic clock.
 reports median/p95 with sample counts; an optional `max_tokens` cap bounds
 worst-case generation latency (measure first — low caps hurt tool selection).
 
+## Model lifetime
+
+The model's memory lifetime follows Ollama's `keep_alive` (config key
+`keep_alive`, default `5m`). `cli.model_command` exposes `model status`,
+`model keep-alive <auto|always|0|dur>` and `model unload`; `unload` issues a
+`/api/generate` request with `keep_alive: 0` and confirms the result with
+`/api/ps`. Unloading is always an explicit, user-driven action: it is never
+triggered between agent-loop steps, it never stops the Ollama server, and it never
+deletes weights. Each turn is a separate short-lived worker, so no daemon is
+needed; `model unload` refuses (best effort) while a recording is in progress.
+
 ## Model compatibility
 
 Native Ollama tool calling is preferred. `llm.ollama_chat` raises
@@ -126,5 +141,9 @@ the tools.
   takes down the compositor binding, and the key release stays instant.
 - **A file, not a database, for context.** The session is small, bounded,
   atomically written, and expires; persistent memory lives separately.
+- **Discover, do not assume.** Launching a browser, app, terminal, Steam game or
+  OpenCode first resolves an executable (`discovery.py`: configured value, then
+  `PATH`, then documented candidates). Discovery is a capability check, never an
+  authorisation, and never a shell.
 - **Everything local.** Whisper and the model run on this machine; the only
   socket is Ollama on loopback, and the only browser call is an explicit search.
