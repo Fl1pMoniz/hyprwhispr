@@ -72,6 +72,35 @@ DEFAULTS = {
     # residency: being enabled does NOT load the model; the first request does.
     # Defaults to on so existing configurations keep working unchanged.
     "enabled": True,
+    # --- desktop context ---
+    # Include the focused Hyprland window (address/class/title) in the prompt so the
+    # model can resolve "this window" references. Read-only and best-effort.
+    "desktop_context": True,
+    # --- application selection context (Stage 3, optional) ---
+    # Read the selected/active object inside the focused application via AT-SPI
+    # (Linux accessibility). Needs PyGObject/pyatspi and desktop accessibility
+    # enabled; otherwise it is reported as unavailable and never guessed.
+    "selection_context": True,
+    "a11y_python": "",            # interpreter for the AT-SPI helper; "" = auto-detect
+    # Resolve a selected file manager item to a verified path via the XDG primary
+    # selection (text/uri-list) using wl-clipboard. Local, and rejected unless it is
+    # a single existing local file:// URI.
+    "selection_clipboard": True,
+    # Reading a document's *contents* is a separate, opt-in action (privacy).
+    "document_read": False,
+    # --- development processes (Stage 4) ---
+    # Allow stop_process to gracefully stop a process (always confirmed first). Set
+    # false to keep discovery read-only. Discovery is always available.
+    "process_control": True,
+    # --- development services (Stage 5) ---
+    # Allow start/stop/restart of registered services (always confirmed first). Set
+    # false to keep service discovery/status read-only. Registered in services.json.
+    "service_lifecycle": True,
+    # --- arbitrary command execution (Stage 6) ---
+    # run_shell runs an arbitrary shell command (still confirmed). Off by default so
+    # a service cannot be started through the shell; registered services use the
+    # service manager instead. Enable explicitly if you need ad-hoc commands.
+    "shell_control": False,
     # --- inference (Ollama, local only) ---
     "ollama_url": "http://127.0.0.1:11434",
     "model": "qwen3:4b",

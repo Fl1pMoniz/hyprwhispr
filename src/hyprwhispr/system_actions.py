@@ -24,6 +24,9 @@ from .validation import args_ok, valid_package
 
 
 def tool_run_shell(cfg: dict, command: str) -> str:
+    if not cfg.get("shell_control", False):
+        return ("error: arbitrary shell execution is disabled; set \"shell_control\": true to "
+                "allow it (registered services should use start_service/restart_service)")
     if not args_ok(command, 2000):
         return "error: invalid command"
     if not confirm("Run this shell command?", command):

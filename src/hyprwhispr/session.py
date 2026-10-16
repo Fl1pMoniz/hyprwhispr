@@ -232,7 +232,7 @@ def activity_context(state: dict, limit: int = 6) -> str:
 def _action_target(tool: str, arguments: object) -> str:
     if not isinstance(arguments, dict):
         return ""
-    for key in ("app", "game", "query", "key"):
+    for key in ("app", "game", "query", "key", "address", "pane_id"):
         value = arguments.get(key)
         if isinstance(value, str):
             # Collapse all whitespace (newlines, tabs, runs) into single spaces so

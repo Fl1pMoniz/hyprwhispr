@@ -23,6 +23,48 @@ environment variables:
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | master on/off switch. Change it with `hyprwhispr power on` / `power off` |
+| `desktop_context` | `true` | include the focused Hyprland window (address/class/title) in the prompt so the model can resolve "this window". Read-only, best-effort |
+| `selection_context` | `true` | read the selected/active object inside the focused application via AT-SPI (needs `pyatspi` + desktop accessibility; otherwise reported unavailable) |
+| `a11y_python` | `""` | interpreter used for the AT-SPI helper; empty = auto-detect a Python that can import `pyatspi` |
+| `selection_clipboard` | `true` | resolve a selected file to a verified path via the XDG primary selection (`text/uri-list`) using `wl-clipboard` |
+| `document_read` | `false` | allow `read_document` to read a local file's text after an explicit request (privacy-sensitive; off by default) |
+| `process_control` | `true` | allow `stop_process` to gracefully stop a process (always confirmed first). Set false to keep process discovery read-only |
+| `service_lifecycle` | `true` | allow `start_service`/`stop_service`/`restart_service` for **registered** services (always confirmed first). Read-only service discovery/status always works |
+| `shell_control` | `false` | allow `run_shell` to run an **arbitrary** shell command (still confirmed). Off by default so services cannot be started through the shell; registered services use the service manager |
+
+## Development services (`services.json`)
+
+Registered development services live in a **separate, hand-written** file next to
+`config.json` (override with `HYPRWHISPR_SERVICES`):
+
+```
+~/.config/hyprwhispr/services.json
+```
+
+The assistant only **reads** it, so it can never invent a launch command. See
+`examples/services.example.json`:
+
+```json
+{"services": {
+  "frontend": {
+    "label": "Web frontend",
+    "project_root": "/home/you/app",
+    "cwd": "/home/you/app/frontend",
+    "command": ["npm", "run", "dev"],
+    "lifecycle": {"start": true, "stop": true, "restart": true},
+    "ready": {"port": 5173},
+    "startup_timeout": 20,
+    "shutdown_timeout": 5,
+    "log": {"path": "frontend/dev.log"}
+  }
+}}
+```
+
+Validation: the id is a safe token; `project_root`/`cwd` are absolute, must exist,
+and `cwd` must be inside `project_root`; `command` is a non-empty argv array whose
+executable resolves; timeouts are 1–600 s; `ready.port` is 1–65535; `log.path`
+resolves inside `project_root`. Invalid entries are ignored (with a note) and never
+executed. No environment values are stored or logged.
 
 `enabled` is written with an atomic read-modify-write (`config.update_config`) so
 it does not clobber other settings, and a missing key means enabled (existing

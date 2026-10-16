@@ -1,0 +1,22 @@
+{
+  "services": {
+    "frontend": {
+      "label": "Web frontend",
+      "project_root": "/home/USER/projects/app",
+      "cwd": "/home/USER/projects/app/frontend",
+      "command": ["npm", "run", "dev"],
+      "lifecycle": {"start": true, "stop": true, "restart": true},
+      "ready": {"port": 5173},
+      "startup_timeout": 20,
+      "shutdown_timeout": 5,
+      "log": {"path": "frontend/dev.log"}
+    },
+    "backend": {
+      "label": "API backend",
+      "project_root": "/home/USER/projects/app",
+      "cwd": "/home/USER/projects/app/backend",
+      "command": ["uvicorn", "app:app", "--port", "8000"],
+      "ready": {"port": 8000}
+    }
+  }
+}

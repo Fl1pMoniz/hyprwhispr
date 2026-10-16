@@ -1,5 +1,13 @@
 {
   "enabled": true,
+  "desktop_context": true,
+  "selection_context": true,
+  "a11y_python": "",
+  "selection_clipboard": true,
+  "document_read": false,
+  "process_control": true,
+  "service_lifecycle": true,
+  "shell_control": false,
   "ollama_url": "http://127.0.0.1:11434",
   "model": "qwen3:4b",
   "model_aliases": {"small": "qwen3:4b", "large": "qwen3:8b"},

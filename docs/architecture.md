@@ -44,6 +44,11 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
 | `llm.py` | Ollama client, agent loop, tool-call parsing/sanitisation, timing |
 | `tools.py` | the tool registry (JSON schemas) and `dispatch_tool` |
 | `power.py` | activation flag (`is_enabled`) plus safe model release (`unload_if_idle`, `recording_active`) |
+| `desktop.py` | verified Hyprland window + tmux pane context, and precisely-targeted, confirmed actions |
+| `selection.py` | optional AT-SPI selection/active-object context (helper process) + bounded `read_document` |
+| `processes.py` | process/socket/project discovery from `/proc` with stable `(pid, starttime)` identity and confirmed `stop_process` |
+| `services.py` | hand-written service registry, status/readiness, and confirmed start/stop/restart of registered services |
+| `policy.py` | central tool-execution policy: tool categories, capability gates, required-argument validation |
 | `discovery.py` | capability check: is a usable executable available (configured → PATH → candidates), with a short bounded cache |
 | `browsers.py` | browser discovery and safe URL opening (`browser_bin`, common browsers, `xdg-open`/`gio` fallback) |
 | `apps.py` | `.desktop` + Steam indexing, normalization, resolve/launch/close |
@@ -106,6 +111,68 @@ worker logs a `pipeline_total`. All durations use a monotonic clock.
 `scripts/benchmark.py` aggregates the same metrics across a fixed request set and
 reports median/p95 with sample counts; an optional `max_tokens` cap bounds
 worst-case generation latency (measure first — low caps hurt tool selection).
+
+## Desktop context and target resolution
+
+Natural-language understanding stays with the model; identity and safety stay in
+Python. Each turn may include a compact, verified "focused window" note
+(`desktop.context_line`, gated by `desktop_context`). The model reasons over that
+plus `list_windows` / `list_tmux_panes` output and picks a target:
+
+1. interpret the request (model);
+2. discover candidate targets (Python, read-only);
+3. choose the intended object (model, from verified candidates);
+4. validate the chosen identity and, for destructive actions, confirm the exact
+   target (Python);
+5. revalidate the identity and execute against that exact object (Python).
+
+A Hyprland window `address` and a tmux `pane_id` are the identities; titles and
+classes are only hints. If several candidates fit, or the selection is inside an
+application (a file, tab or document), the model asks instead of guessing, and
+`desktop.py` never fabricates an address, pane id, pid or selection. Focus can
+change while the model thinks, so `close_window` / `close_tmux_pane` revalidate
+after confirmation and abort if the target moved or closed.
+
+Stage 3 adds optional **selection** context (`selection.py`): the selected object
+inside an application, read from AT-SPI. Because the standard-library venv cannot
+import `gi`, the AT-SPI read runs in a bounded helper process under an interpreter
+that can, and returns one JSON object; the main program parses it and labels the
+value `selected` / `active` / `displayed`, `verified` or not. When no provider is
+available the context is `unavailable` and the model asks. Reading file contents
+is a separate opt-in action (`document_read`) whose output is labelled untrusted.
+
+Stage 3.1 adds **verified file paths**: the XDG primary selection's `text/uri-list`
+(a file manager offers the selected files' `file://` URIs there) is read with
+`wl-paste`, parsed with `urllib`, canonicalized, and accepted only as a single
+existing local file; several selections are reported ambiguous. This is kept as a
+separate provider (`source: primary-selection`) from the AT-SPI name/text, so the
+two are never merged into one target.
+
+Stage 4 adds **process/project awareness** (`processes.py`). Discovery reads
+`/proc/<pid>/stat` (parsing the parenthesised command name safely) for identity
+``(pid, starttime)``, `/proc/<pid>/fd` + `/proc/net/*` for listening sockets, and
+the focused tmux pane / window working directory for the project root (marker-based,
+walking up). The LLM reasons over read-only results and may call `stop_process` with
+an exact `id`; Python confirms, revalidates the identity against fresh `/proc` data,
+and sends SIGTERM only. Nothing is killed by name or port, and PID reuse is
+detected because the start time is part of the identity.
+
+Stage 5 adds **service lifecycle management** (`services.py`) on top of that. A
+hand-written registry (`services.json`) maps ids to validated definitions
+(project root, cwd inside it, an argv command, timeouts, an optional readiness
+port and log path). The assistant only reads it. A managed launch records the
+child's identity durably; status is derived from that identity plus the configured
+readiness port (owned by the process); start/stop/restart are confirmed and
+revalidate both the definition and the runtime identity, send `SIGTERM` only, and
+never manage unregistered or externally-started processes.
+
+Stage 6 adds the authorization boundary: `policy.py` classifies every tool
+(read/reversible/confirmed), declares capability gates, and validates required
+arguments; `tools.dispatch_tool` consults it **before** any tool body runs, so a
+model call that is unknown, malformed, or gated is refused and never falls through.
+Service targets resolve only by exact id or registered alias (labels are not
+identity), and arbitrary command execution (`run_shell`) is off by default and
+separated from the service manager.
 
 ## Power and model residency
 

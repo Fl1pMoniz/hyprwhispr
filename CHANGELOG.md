@@ -6,6 +6,82 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Central tool-execution policy and authorization hardening (Stage 6).** New
+  `policy.py` classifies every registered tool (read-only / reversible / confirmed)
+  and declares capability gates; `tools.dispatch_tool` consults it **before** any
+  tool body runs, rejecting unknown tools, missing/oversized required arguments, and
+  disabled capabilities, with no fall-through path. Service targets now resolve only
+  by exact registered **id** or an explicit registered **alias** (a human label is
+  never matched), returning structured `ok`/`missing`/`ambiguous` results so a
+  requested-but-unregistered service (e.g. "backend" with only "frontend"
+  registered) is never silently substituted. Arbitrary shell execution (`run_shell`)
+  is now gated by the new `shell_control` capability and **off by default**, so a
+  service cannot be started through the shell. Registry entries gained an optional
+  `aliases` list. Confirmation continues to bind the exact target and revalidate
+  identity, and lifetime/definition changes abort the action.
+- **Development-service lifecycle management (Stage 5).** New `services.py` with a
+  small, **hand-written** service registry (`services.json` next to `config.json`;
+  `HYPRWHISPR_SERVICES` override) that the assistant only reads. Definitions are
+  validated (absolute canonical `project_root`/`cwd` with cwd inside the root, an
+  argv `command` whose executable resolves, bounded timeouts, optional readiness
+  port and in-project log path). Read-only tools `list_services`, `inspect_service`,
+  `service_logs`; confirmed lifecycle tools `start_service`, `stop_service`,
+  `restart_service`. A managed start records the child's `(pid, start time)`
+  identity durably and revalidates it against `/proc` before later actions (PID
+  reuse is detected; ownership is the direct child only). Status is
+  STOPPED/STARTING/RUNNING/UNHEALTHY/UNKNOWN with evidence (a port is never proof on
+  its own). Launches use an argv with a minimal environment and no shell; stop is
+  `SIGTERM` only; restart aborts on a changed definition or a failed stop. Config:
+  `service_lifecycle` (default true). Unregistered services, command discovery from
+  a project, and systemd/Docker orchestration are intentionally not supported.
+- **Development process/project awareness (Stage 4).** New `processes.py` discovers
+  local development processes and listening sockets from `/proc` and `/proc/net`
+  (no new dependency, no shell), with a stable identity of `(pid, kernel start
+  time)` so a reused PID is detected and refused. Read-only tools: `list_processes`,
+  `inspect_process`, `list_listening_ports`, `inspect_project_services` (project
+  root found conservatively from focused tmux/window context via markers; services
+  are processes whose working directory is inside the root), and
+  `capture_tmux_pane` (bounded, untrusted output). Command lines are redacted of
+  secret-looking flags and environments are never read. The confirmation-gated
+  `stop_process` stops exactly one process by id: it revalidates the identity, sends
+  **SIGTERM only**, waits a bounded 5 s and never escalates to `SIGKILL`, `pkill -f`
+  or kill-by-port. Config: `process_control` (default true). Starting/restarting
+  services and process-tree kills are intentionally not implemented.
+- **Verified selected-file paths (Stage 3.1).** A selected file-manager item is now
+  resolved to a real filesystem path via the XDG primary selection's
+  `text/uri-list` (read with `wl-clipboard`); `file://` URIs are parsed with
+  `urllib`, canonicalized, and accepted only as a single existing local file —
+  other schemes/hosts are rejected and several selected items are reported as
+  ambiguous rather than picked. `get_selection` reports the verified path
+  (`source: primary-selection`) separately from the AT-SPI name/text, and the new
+  confirmation-gated `open_selected` opens the single verified file. Config:
+  `selection_clipboard` (default true). The system prompt now tells the model to
+  call `get_selection` before asking the user and to use a verified path rather
+  than a name.
+- **Selection context (Stage 3, optional).** New `selection.py` reads the object
+  the user has selected or has active inside the focused application (selected
+  text, a selected item/file name, an active browser tab, or a displayed document)
+  via **AT-SPI**. A short-lived helper process runs under a Python that has
+  PyGObject, so the standard-library venv stays dependency-free. Context is
+  labelled `selected`/`active`/`displayed` and `verified`, and reported
+  `unavailable`/`unsupported` rather than guessed when the provider is missing
+  (accessibility disabled, `pyatspi` absent, or a sandboxed app off the bus). New
+  read-only tool `get_selection`, and opt-in `read_document` (disabled unless
+  `document_read` is true) that reads a bounded local file as untrusted data.
+  Config: `selection_context` (default true), `a11y_python` (default auto), and
+  `document_read` (default false).
+- **Natural-language desktop targets (windows and tmux).** New `desktop.py` reads
+  verified Hyprland window context (focused window, open windows with their stable
+  `address`) and resolves the tmux pane shown in the focused terminal from the
+  window's process tree (not the `TMUX` environment). New tools: read-only
+  `list_windows` / `list_tmux_panes`, and confirmation-gated `close_window` /
+  `close_tmux_pane` that show the exact target, then **revalidate** its identity
+  and abort if it changed or disappeared. `close_app` now also confirms before
+  closing windows. Each turn may include a compact focused-window note
+  (`desktop_context`, default on). The model interprets the request; identity and
+  safety stay in Python - it never invents an address/pane id/selection, and focus
+  is treated as distinct from an in-app selection. Requires Hyprland (`hyprctl`)
+  and, for panes, `tmux`; unavailable integrations fail clearly.
 - **On/off control (`hyprwhispr power`).** `power status` reports the enabled
   state, recording activity and model status (reusing `model status`); `power on`
   flips a persistent `enabled` switch without loading the model; `power off`

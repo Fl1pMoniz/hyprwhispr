@@ -71,6 +71,10 @@ HyprWhispr is built to work in **Ukrainian**, not just English:
   idle time, keep it loaded, or release it on demand (`model ...`, see below).
 - **Power switch** — `power on`/`power off` enable or disable the assistant and
   release the model when idle; enabling does not load the model.
+- **Natural-language desktop targets** — the model interprets references like
+  "close this window", "the other Firefox window" or "the pane running the failed
+  build" using verified Hyprland window and tmux pane context; a precise window or
+  pane target is confirmed and revalidated before it is closed.
 - **Ambiguity handling** — when several apps match, it asks instead of guessing,
   and remembers the choices for the next turn.
 - **Launch and close apps and Steam games** by name, discovered from your
@@ -369,6 +373,131 @@ failing silently.
 
 Discovery only checks that a program exists; it never grants permission to run it,
 and all launches still use an argument vector (never a shell).
+
+### Windows, terminals and precise targets
+
+The model does the language understanding; HyprWhispr supplies verified context and
+enforces identity and confirmation. When you say things like:
+
+- "close this window" / "I don't need this Firefox window anymore"
+- "close the other browser window" / "close the one with the documentation, not my code"
+- "what do I have open right now?"
+- "close the pane running the failed build" (tmux)
+
+…the assistant reads the focused window (each turn includes a compact, verified
+"focused window" note) and can call `list_windows` to see every open window with
+its Hyprland **address**, or `list_tmux_panes` for tmux panes with their **pane
+id**. It then closes the single window/pane you mean with `close_window` /
+`close_tmux_pane`, which show the exact target, ask you to confirm, and
+**revalidate** it (aborting if it moved or closed). Closing *all* windows of an app
+uses `close_app`.
+
+Focus is not selection: Hyprland can tell which window is focused, but not which
+file, browser tab or document is selected inside it. If you mean a selected item,
+the assistant says it cannot determine it and asks you to identify it. When several
+windows or panes could match, it asks rather than guessing. tmux support requires
+`tmux`; window control requires Hyprland (`hyprctl`).
+
+### Selected items and documents (optional)
+
+Where an application exposes it through **AT-SPI** (Linux accessibility), the
+assistant can read what you have selected or active inside the focused window — a
+selected file name, the active browser tab, a document open in a viewer, or
+selected text — and answer things like "what am I looking at?" or "the tab I'm
+on". Context is labelled honestly: `selected`, `active` or `displayed`, and
+`verified` only when the application itself reported it.
+
+Requirements and limits:
+
+- Needs `pyatspi`/PyGObject and **desktop accessibility enabled**. The program
+  stays standard-library-only: it runs a short-lived AT-SPI helper under a Python
+  that has PyGObject (set `a11y_python`, or leave empty to auto-detect).
+- Flatpak/sandboxed apps may not appear on the accessibility bus at all. When the
+  selection cannot be read, the assistant says so and asks you to identify it — it
+  never guesses. A name it reads is **not** treated as a file path.
+- **Files you select get a verified path.** When a file manager selects files, it
+  offers their `file://` URIs on the XDG primary selection; the assistant reads
+  that with `wl-clipboard` (`wl-paste`), so "the file I selected" resolves to a
+  real, canonical path. Multiple selections are reported as ambiguous (it asks
+  which one). No file manager exposes a D-Bus query for its selection, so this
+  clipboard route is the reliable cross-file-manager interface.
+- Turn off individual parts with `"selection_context": false` (AT-SPI names/tabs)
+  or `"selection_clipboard": false` (selected-file paths).
+- Reading a file's *contents* is a separate, opt-in action: set
+  `"document_read": true` to allow "read/summarise this file" on an absolute path
+  you name (or a verified selected path). The text is treated as untrusted data,
+  never as instructions. `open_selected` opens the selected file (with a
+  confirmation) instead of reading it.
+
+### Development processes and servers
+
+HyprWhispr can answer "what is running for this project?", "what is using port
+3000?", "stop the server in this terminal" and "show me the logs in this terminal"
+using verified local evidence (`/proc`, `/proc/net`, tmux/Hyprland context) — no
+extra dependency:
+
+- Processes have a **stable identity**: an `id` like `pid:4100:start:88123`
+  (pid + kernel start time). A reused PID is detected, so it never stops the wrong
+  process. Command lines are shown **redacted** of secret-looking flags, and
+  environment variables are never read.
+- The project root is found conservatively (`.git`, `pyproject.toml`,
+  `package.json`, ... walking up from the focused terminal/pane), and services are
+  the processes whose **working directory is inside it** — a name like "backend" is
+  never assumed.
+- `stop_process` takes that exact id, shows the process, asks for **confirmation**,
+  revalidates it, and sends **SIGTERM only** — never `pkill -f`, never `kill -9`,
+  never by port or name. If several processes match, it asks. Set
+  `"process_control": false` to keep discovery read-only.
+- `capture_tmux_pane` shows bounded recent terminal output, labelled as untrusted
+  data.
+- **Not supported:** starting/restarting services (no trusted service definition —
+  use an explicit, confirmed `run_shell` command), process-tree kills, and
+  Docker/systemd orchestration.
+
+### Development services (registered)
+
+For full start/stop/restart, register the services you want managed in a small
+hand-written file next to your config:
+
+```
+~/.config/hyprwhispr/services.json      # see examples/services.example.json
+```
+
+```json
+{"services": {"frontend": {
+  "project_root": "/home/you/app", "cwd": "/home/you/app/frontend",
+  "command": ["npm", "run", "dev"], "ready": {"port": 5173}}}}
+```
+
+Then "is the dev server running?", "start the frontend", "restart the backend" all
+work. Key points:
+
+- The assistant only **reads** the registry — it never invents or runs a command,
+  and there is no shell. Service status is `STOPPED`/`STARTING`/`RUNNING`/
+  `UNHEALTHY`/`UNKNOWN`, with evidence.
+- A managed start records the child's `(pid, start time)` and revalidates it before
+  every later action, so a reused PID can't be mistaken for your service. Ownership
+  is the direct child only — no process-tree kills.
+- Start/stop/restart **confirm first** and are `SIGTERM`-only. A service started
+  outside the manager is never adopted; `stop_service` refuses rather than guess.
+  Restart aborts if the definition changed or the stop failed. Disable lifecycle
+  changes with `"service_lifecycle": false` (discovery/status still work).
+- **Not supported:** unregistered services, discovering commands from a project,
+  and systemd/Docker orchestration.
+
+### Authorization
+
+Every tool call passes a central policy (`policy.py`) before it runs: unknown
+tools, missing arguments, and disabled capabilities are refused, and a refusal
+never falls through to another path. Tools are read-only, reversible, or confirmed
+(exact target shown, then revalidated). Two consequences worth knowing:
+
+- **A requested service that is not registered is never substituted.** Resolution
+  is by exact id or a registered alias only; `backend` will not become `frontend`.
+- **`run_shell` (arbitrary commands) is off by default.** Enable it with
+  `"shell_control": true` if you need ad-hoc commands; otherwise development
+  services should go through the registry, and process control through
+  `stop_process`/`process_control`.
 
 ## Commands
 

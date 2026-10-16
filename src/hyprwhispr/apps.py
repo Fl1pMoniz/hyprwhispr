@@ -611,6 +611,10 @@ def tool_close_app(cfg: dict, app: str) -> str:
     hits = _windows_matching(tokens)
     if hits:
         titles = sorted({(w.get("title") or w.get("class") or "") for w in hits})
+        detail = "\n".join(titles[:8]) + (f"\n(+{len(titles) - 8} more)" if len(titles) > 8 else "")
+        if not confirm(f"Close {len(hits)} window(s) for '{app}'?", detail):
+            log_event({"event": "tool_denied", "tool": "close_app", "target": app})
+            return "user denied closing the windows"
         for window in hits:  # graceful close: focus the window, then close it
             _hypr_dispatch(f'hl.dsp.exec_raw("focuswindow address:{window["address"]}")')
             _hypr_dispatch("hl.dsp.window.close()")

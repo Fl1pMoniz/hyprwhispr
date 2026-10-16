@@ -37,7 +37,8 @@ def test_run_shell_requires_confirmation(monkeypatch):
     monkeypatch.setattr(system_actions, "confirm", lambda *a, **k: False)
     rec = Recorder()
     monkeypatch.setattr(system_actions.subprocess, "run", rec.run)
-    result = system_actions.tool_run_shell(_cfg(), "echo hi")
+    cfg = _cfg(); cfg["shell_control"] = True   # capability must be enabled for run_shell
+    result = system_actions.tool_run_shell(cfg, "echo hi")
     assert "denied" in result
     assert rec.calls == []
 
@@ -46,7 +47,18 @@ def test_run_shell_runs_when_approved(monkeypatch):
     monkeypatch.setattr(system_actions, "confirm", lambda *a, **k: True)
     monkeypatch.setattr(system_actions.subprocess, "run",
                         lambda *a, **k: SimpleNamespace(returncode=0, stdout="hi\n", stderr=""))
-    assert system_actions.tool_run_shell(_cfg(), "echo hi").startswith("exit 0")
+    cfg = _cfg(); cfg["shell_control"] = True
+    assert system_actions.tool_run_shell(cfg, "echo hi").startswith("exit 0")
+
+
+def test_run_shell_disabled_by_default(monkeypatch):
+    # shell_control defaults to false: arbitrary execution is off and no command runs
+    monkeypatch.setattr(system_actions, "confirm", lambda *a, **k: True)
+    rec = Recorder()
+    monkeypatch.setattr(system_actions.subprocess, "run", rec.run)
+    result = system_actions.tool_run_shell(_cfg(), "echo hi")
+    assert result.startswith("error:") and "disabled" in result
+    assert rec.calls == []
 
 
 # --- install_package ---------------------------------------------------------
