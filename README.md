@@ -28,7 +28,7 @@ HyprWhispr is built to work in **Ukrainian**, not just English:
 - **Local and private** — recognition and inference run on your machine; no audio
   or text is sent to a cloud service.
 
-Слава Україні! 🇺🇦
+Слава Україні! 🇺🇦 пізда російській педерації
 
 ## Goals and design principles
 
@@ -125,14 +125,14 @@ missing, and then — with your confirmation — does as much as it safely can:
 
 It is idempotent: re-running it reuses what already works and changes nothing else.
 
-| Flag | Effect |
-|---|---|
-| `--check` | Read-only dependency report (PASS/WARN/FAIL) |
-| `--dry-run` | Show exactly what would happen, changing nothing |
-| `--yes` | Non-interactive: accept the supported prompts |
-| `--no-model-download` | Skip the Ollama and Whisper model downloads |
-| `--with-wake-word` | Also install the optional wake-word engine (openWakeWord) |
-| `--help` | Usage |
+| Flag                  | Effect                                                    |
+| --------------------- | --------------------------------------------------------- |
+| `--check`             | Read-only dependency report (PASS/WARN/FAIL)              |
+| `--dry-run`           | Show exactly what would happen, changing nothing          |
+| `--yes`               | Non-interactive: accept the supported prompts             |
+| `--no-model-download` | Skip the Ollama and Whisper model downloads               |
+| `--with-wake-word`    | Also install the optional wake-word engine (openWakeWord) |
+| `--help`              | Usage                                                     |
 
 **Automatic:** Fedora/Nobara packages, the Python app, and the local models.
 **Never:** installing a desktop environment, overwriting your config, editing your
@@ -259,11 +259,11 @@ These are **measurements on one machine** (NVIDIA RTX 4070 12 GB, `qwen3:4b`,
 `small` on GPU) made with
 `nvidia-smi --query-compute-apps=process_name,used_memory --format=csv`:
 
-| State | Approx. VRAM held by hyprwhispr |
-|---|---|
-| Idle, model unloaded | 0 MiB |
-| Idle, model warm (`keep_alive`) | ~3.2 GB |
-| During transcription (whisper on GPU) | ~1 GB, transient |
+| State                                 | Approx. VRAM held by hyprwhispr |
+| ------------------------------------- | ------------------------------- |
+| Idle, model unloaded                  | 0 MiB                           |
+| Idle, model warm (`keep_alive`)       | ~3.2 GB                         |
+| During transcription (whisper on GPU) | ~1 GB, transient                |
 
 Your numbers will differ with model, context size and driver. To reduce usage:
 `hyprwhispr model small`, `"whisper_gpu": false`, and a shorter `keep_alive`.
@@ -298,20 +298,20 @@ phrases. Details, licensing and accuracy caveats:
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `record-start` / `record-stop` | the push-to-talk pair used by the keybinding |
-| `ask <text>` | run the model + tools on typed text |
-| `listen [sec]` | record, transcribe, answer (terminal test) |
-| `transcribe <wav>` / `process <wav>` | speech-to-text only / full pipeline |
-| `read` | show the last exchange |
-| `apps` / `games` / `launch` / `play` / `close` | application and game control |
-| `resolve <query>` | show which apps/games match a query (debug) |
-| `session` / `session clear` | show or clear the conversation context |
-| `refresh-apps` | rebuild the app and Steam indexes |
-| `list-mics` / `mictest` | microphone helpers |
-| `model [small\|large\|name]` | show or set the model |
-| `version` | print the version |
+| Command                                        | Purpose                                      |
+| ---------------------------------------------- | -------------------------------------------- |
+| `record-start` / `record-stop`                 | the push-to-talk pair used by the keybinding |
+| `ask <text>`                                   | run the model + tools on typed text          |
+| `listen [sec]`                                 | record, transcribe, answer (terminal test)   |
+| `transcribe <wav>` / `process <wav>`           | speech-to-text only / full pipeline          |
+| `read`                                         | show the last exchange                       |
+| `apps` / `games` / `launch` / `play` / `close` | application and game control                 |
+| `resolve <query>`                              | show which apps/games match a query (debug)  |
+| `session` / `session clear`                    | show or clear the conversation context       |
+| `refresh-apps`                                 | rebuild the app and Steam indexes            |
+| `list-mics` / `mictest`                        | microphone helpers                           |
+| `model [small\|large\|name]`                   | show or set the model                        |
+| `version`                                      | print the version                            |
 
 Tools the model can call are documented in [`docs/tools.md`](docs/tools.md).
 
@@ -352,7 +352,7 @@ accuracy, clarification rate, unsafe-action rate, LLM calls per task, latency
 (median / p95 with sample counts and a per-stage total/LLM/tool breakdown), and -
 for a live model - whether non-Latin replies use the expected script.
 
-**Scope:** the text fixtures measure the *assistant*, not speech recognition (no
+**Scope:** the text fixtures measure the _assistant_, not speech recognition (no
 audio or Whisper is involved). Transcription is measured separately with
 `--transcribe`, and word error rate only with `--wer` and a manifest that pairs
 local recordings with reference transcripts. Script checks can confirm a writing
