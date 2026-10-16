@@ -43,6 +43,7 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
 | `speech.py` | whisper.cpp invocation, GPU→CPU fallback, transcript cleanup |
 | `llm.py` | Ollama client, agent loop, tool-call parsing/sanitisation, timing |
 | `tools.py` | the tool registry (JSON schemas) and `dispatch_tool` |
+| `power.py` | activation flag (`is_enabled`) plus safe model release (`unload_if_idle`, `recording_active`) |
 | `discovery.py` | capability check: is a usable executable available (configured → PATH → candidates), with a short bounded cache |
 | `browsers.py` | browser discovery and safe URL opening (`browser_bin`, common browsers, `xdg-open`/`gio` fallback) |
 | `apps.py` | `.desktop` + Steam indexing, normalization, resolve/launch/close |
@@ -105,6 +106,24 @@ worker logs a `pipeline_total`. All durations use a monotonic clock.
 `scripts/benchmark.py` aggregates the same metrics across a fixed request set and
 reports median/p95 with sample counts; an optional `max_tokens` cap bounds
 worst-case generation latency (measure first — low caps hurt tool selection).
+
+## Power and model residency
+
+HyprWhispr is a one-shot CLI, not a daemon. `record-start` spawns a detached
+recorder; `record-stop` stops it and spawns a detached ``process`` worker that
+transcribes, runs the agent turn and exits. `ask`/`listen` run in the invoking
+process. The only long-running process is the optional foreground
+``wake-word listen`` loop. Nothing autostarts.
+
+Because there is no daemon, "power" is a persistent ``enabled`` flag
+(``config.py``): when off, `power.require_enabled` makes assistant turns refuse to
+run, ``record_start``/``listen``/``wake-word listen`` decline, and ``power off``
+releases the model once no recording is active. Enabling never loads the model;
+the first request does. Unloading reuses ``llm.unload_model`` + ``/api/ps`` and
+never stops the Ollama server. Coordination is best-effort: the flag lives in the
+config file (updated atomically) and the only activity signal is the recorder
+pidfile — a detached inference worker is not tracked, so ``power off`` may race a
+turn that is already inferring (the model is simply reloaded next time).
 
 ## Model lifetime
 

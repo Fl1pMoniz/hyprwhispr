@@ -1,4 +1,5 @@
 {
+  "enabled": true,
   "ollama_url": "http://127.0.0.1:11434",
   "model": "qwen3:4b",
   "model_aliases": {"small": "qwen3:4b", "large": "qwen3:8b"},

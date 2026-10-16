@@ -95,6 +95,9 @@ def _open_recorder_log():
 def record_start(cfg: dict) -> int:
     """Begin capturing audio (invoked on hotkey press)."""
     config.ensure_dirs()
+    if not config.is_enabled(cfg):
+        notify("hyprwhispr is off", "Enable it with: hyprwhispr power on")
+        return 1
     if config.PIDFILE.exists():
         try:
             old_pid = int(config.PIDFILE.read_text().strip())
@@ -147,6 +150,10 @@ def record_stop(cfg: dict) -> int:
         pass
     config.PIDFILE.unlink(missing_ok=True)
     log_event({"event": "record_stop", "pid": pid, "held_ms": held_ms})
+
+    if not config.is_enabled(cfg):
+        notify("hyprwhispr is off", "The recording was discarded.")
+        return 0
 
     if not config.WAVFILE.exists() or config.WAVFILE.stat().st_size < 2000:
         notify("Nothing recorded", "The clip was too short - hold the key while you speak.")

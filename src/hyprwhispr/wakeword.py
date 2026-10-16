@@ -580,6 +580,8 @@ def run_listen(cfg: dict, command_handler, *, text_handler=None, detector_factor
             f"wake-word activation is off (mode is '{settings.mode}'); enable it with: "
             "hyprwhispr wake-word enable"
         )
+    if not config.is_enabled(cfg):
+        raise WakeWordError("hyprwhispr is off; enable it with: hyprwhispr power on")
     config.ensure_dirs()
     detector = detector_factory(cfg)
     source = source_factory(cfg, detector.frame_samples)

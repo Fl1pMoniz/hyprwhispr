@@ -69,6 +69,8 @@ HyprWhispr is built to work in **Ukrainian**, not just English:
   targets carry a freshness note, and only relevant preferences are injected.
 - **Model memory controls** — keep the model warm, unload it after a configurable
   idle time, keep it loaded, or release it on demand (`model ...`, see below).
+- **Power switch** — `power on`/`power off` enable or disable the assistant and
+  release the model when idle; enabling does not load the model.
 - **Ambiguity handling** — when several apps match, it asks instead of guessing,
   and remembers the choices for the next turn.
 - **Launch and close apps and Steam games** by name, discovered from your
@@ -256,6 +258,7 @@ hyprwhispr ask "what is 2+2" # type instead of speaking
 hyprwhispr list-mics         # find your microphone
 hyprwhispr mictest           # check the input level
 hyprwhispr model small       # switch to the smaller model
+hyprwhispr power status      # on/off state, activity and model status
 hyprwhispr model status      # model, memory policy and whether it is loaded
 hyprwhispr model unload      # release the model's memory now
 hyprwhispr apps firefox      # search installed apps
@@ -277,6 +280,31 @@ These are **measurements on one machine** (NVIDIA RTX 4070 12 GB, `qwen3:4b`,
 
 Your numbers will differ with model, context size and driver. To reduce usage:
 `hyprwhispr model small`, `"whisper_gpu": false`, and a shorter `keep_alive`.
+
+### Power (on/off) and turning the model off
+
+HyprWhispr is **not a daemon**: each request (push-to-talk, `ask`, `listen`, the
+optional `wake-word listen`) starts a process and exits. There is nothing to
+"start" or "stop", so `power` is a persistent **enabled switch**, kept separate
+from whether the model is loaded:
+
+```bash
+hyprwhispr power status   # enabled state, activity, and model status
+hyprwhispr power on       # allow requests (does NOT load the model)
+hyprwhispr power off      # refuse new requests and release the model when safe
+```
+
+`power on` only flips the switch; the model still loads on the first real request.
+`power off` persists the disabled state, refuses new push-to-talk/`ask`/`listen`/
+wake-word requests (recording is declined too), and — once no recording is in
+progress — asks Ollama to release the configured model. It never stops the Ollama
+server, never touches other applications' models, and never claims VRAM was freed
+(it reports what `/api/ps` confirms). `power status` and `power on` keep working
+while the assistant is off.
+
+Disabling HyprWhispr is different from unloading the model (`model unload`) and
+from stopping Ollama (`systemctl --user stop ollama`): `power off` is the
+assistant's own switch.
 
 ### Model memory (keep-alive and unloading)
 
@@ -354,6 +382,7 @@ and all launches still use an argument vector (never a shell).
 | `apps` / `games` / `launch` / `play` / `close` | application and game control                 |
 | `resolve <query>`                              | show which apps/games match a query (debug)  |
 | `session` / `session clear`                    | show or clear the conversation context       |
+| `power status` / `power on` / `power off`      | enable/disable the assistant and its model   |
 | `refresh-apps`                                 | rebuild the app and Steam indexes            |
 | `list-mics` / `mictest`                        | microphone helpers                           |
 | `model [small\|large\|name]`                   | show or set the model                        |

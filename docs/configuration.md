@@ -18,6 +18,19 @@ environment variables:
 | `HYPRWHISPR_DATA` | data directory (whisper.cpp, models, notes, cache, state) |
 | `HYPRWHISPR_RUNTIME` | runtime directory (recording while in use) |
 
+## Activation
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | master on/off switch. Change it with `hyprwhispr power on` / `power off` |
+
+`enabled` is written with an atomic read-modify-write (`config.update_config`) so
+it does not clobber other settings, and a missing key means enabled (existing
+configs keep working). Being enabled does **not** load the model: that happens on
+the first real request. `power off` refuses new assistant requests and recordings
+and releases the model when no recording is in progress. See the Power section of
+the README.
+
 ## Inference
 
 | Key | Default | Meaning |

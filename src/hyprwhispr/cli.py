@@ -8,7 +8,6 @@ interactive testing (``ask``, ``transcribe``, ``listen``) and management
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import shutil
 import subprocess
@@ -16,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import apps, audio, config, session, speech, wakeword
+from . import apps, audio, config, power, session, speech, wakeword
 from .llm import loaded_models, run_pipeline, unload_model
 from .notify import log_event, notify
 
@@ -48,6 +47,11 @@ Applications and games:
 Conversation:
   session                   show the current conversation context
   session clear             forget the conversation context
+
+Power (on/off switch and model residency; not a daemon):
+  power status              show enabled state, activity and model status
+  power on                  allow assistant requests (does not load the model)
+  power off                 refuse new requests and release the model when safe
 
 Activation (optional wake word; disabled by default):
   wake-word show            show the mode, wake word and capability
@@ -99,6 +103,7 @@ def _cleanup_recording(cfg: dict, wav_path: str) -> None:
 
 
 def _run_turn(cfg: dict, text: str) -> str:
+    power.require_enabled(cfg)
     state = session.load(cfg)
     answer = run_pipeline(cfg, text, state=state)
     session.save(cfg, state)
@@ -173,6 +178,9 @@ def handle_wav(cfg: dict, wav_path: str) -> int:
 def listen(cfg: dict, seconds: int = 6) -> int:
     """Terminal-friendly test: record, print the transcript and the answer."""
     config.ensure_dirs()
+    if not config.is_enabled(cfg):
+        print("hyprwhispr is off; enable it with 'hyprwhispr power on'")
+        return 1
     wav = config.RUNTIME_DIR / "listen.wav"
     print(f"Recording {seconds}s from {cfg.get('mic_target') or 'system default'} - speak now...")
     notify("Listening", f"Speak now for {seconds} seconds", timeout=seconds * 1000)
@@ -281,6 +289,9 @@ def wake_word_command(cfg: dict, rest: list[str]) -> int:
         return 0 if cap["status"] in ("whisper", "pretrained", "configured") else 1
 
     if sub == "listen":
+        if not config.is_enabled(cfg):
+            print("hyprwhispr is off; enable it with 'hyprwhispr power on'")
+            return 1
         try:
             return wakeword.run_listen(cfg, lambda c, wav: handle_wav(c, wav), text_handler=_answer_text)
         except wakeword.WakeWordError as exc:
@@ -293,17 +304,7 @@ def wake_word_command(cfg: dict, rest: list[str]) -> int:
 
 def _recording_active() -> bool:
     """Best-effort check: is a push-to-talk recording in progress right now?"""
-    try:
-        pid = int(config.PIDFILE.read_text().strip())
-    except (OSError, ValueError):
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return power.recording_active()
 
 
 def _same_model(name: str, model: str) -> bool:
@@ -404,6 +405,72 @@ def model_command(cfg: dict, rest: list[str]) -> int:
     return 0
 
 
+def _wait_for_recording_to_finish(timeout: float = 3.0) -> bool:
+    """Briefly wait for an in-progress recording to end (best effort)."""
+    if not power.recording_active():
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not power.recording_active():
+            return True
+        time.sleep(0.1)
+    return not power.recording_active()
+
+
+def _power_status(cfg: dict) -> int:
+    enabled = config.is_enabled(cfg)
+    print(f"enabled: {'yes' if enabled else 'no'}")
+    print("mode: one-shot CLI - each request starts a process and exits (no daemon)")
+    settings = wakeword.get_settings(cfg)
+    print(f"wake word: {settings.mode} (active only while 'hyprwhispr wake-word listen' runs)")
+    print(f"recording: {'in progress (best effort)' if power.recording_active() else 'no'}")
+    print("model:")
+    _model_status(cfg)  # reuse the existing model-status implementation
+    return 0
+
+
+def _power_on(cfg: dict) -> int:
+    if config.is_enabled(cfg):
+        print("hyprwhispr is already on.")
+    else:
+        config.set_enabled(cfg, True)
+        print("hyprwhispr is on.")
+    print("  the model was not loaded; it loads on the first request and follows your "
+          "keep-alive policy.")
+    return 0
+
+
+def _power_off(cfg: dict) -> int:
+    already_off = not config.is_enabled(cfg)
+    config.set_enabled(cfg, False)
+    print("hyprwhispr is off." if not already_off else "hyprwhispr is already off.")
+    print("  new push-to-talk, ask, listen and wake-word requests are refused.")
+    _wait_for_recording_to_finish()
+    if power.recording_active():
+        print("  a recording is still in progress; the model was left loaded. Run "
+              "'hyprwhispr model unload' afterwards if needed.")
+        return 0
+    ok, message = power.unload_if_idle(cfg)
+    print(f"  {message}")
+    if not ok:
+        print("  (best effort: the unload could not be confirmed)")
+    print("  the Ollama server is left running; other applications are unaffected.")
+    return 0
+
+
+def power_command(cfg: dict, rest: list[str]) -> int:
+    """Enable/disable the assistant and report its model residency."""
+    sub = rest[0] if rest else "status"
+    if sub == "status":
+        return _power_status(cfg)
+    if sub == "on":
+        return _power_on(cfg)
+    if sub == "off":
+        return _power_off(cfg)
+    print("usage: hyprwhispr power [status|on|off]")
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -474,6 +541,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(json.dumps(session.load(cfg), indent=2, ensure_ascii=False))
         return 0
+
+    if command == "power":
+        return power_command(cfg, rest)
 
     if command == "wake-word":
         return wake_word_command(cfg, rest)

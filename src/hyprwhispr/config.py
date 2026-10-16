@@ -67,6 +67,11 @@ LAST_ANSWER = RUNTIME_DIR / "last-answer.txt"
 LAST_TRANSCRIPT = RUNTIME_DIR / "last-transcript.txt"
 
 DEFAULTS = {
+    # --- activation ---
+    # Master on/off switch (see `hyprwhispr power`). Orthogonal to model
+    # residency: being enabled does NOT load the model; the first request does.
+    # Defaults to on so existing configurations keep working unchanged.
+    "enabled": True,
     # --- inference (Ollama, local only) ---
     "ollama_url": "http://127.0.0.1:11434",
     "model": "qwen3:4b",
@@ -162,6 +167,54 @@ def save_config(cfg: dict, path: pathlib.Path | None = None) -> None:
     config_file.parent.mkdir(parents=True, exist_ok=True)
     clean = {k: v for k, v in cfg.items() if not k.startswith("_")}
     config_file.write_text(json.dumps(clean, indent=2, ensure_ascii=False) + "\n")
+
+
+def update_config(values: dict, path: pathlib.Path | None = None) -> dict:
+    """Merge *values* into the on-disk config, preserving every other key.
+
+    Unlike :func:`save_config` this does not materialise defaults: it reads the
+    current file, applies only *values*, and writes atomically. Missing or
+    malformed files are treated as an empty base so the update still succeeds.
+    This keeps the activation flag from clobbering unrelated user settings (and
+    vice versa) when two hyprwhispr commands run in separate processes.
+    """
+    config_file = path or CONFIG_PATH
+    current: dict = {}
+    try:
+        data = json.loads(config_file.read_text())
+        if isinstance(data, dict):
+            current = data
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    current.update(values)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = config_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False) + "\n")
+    os.replace(tmp, config_file)
+    return current
+
+
+def is_enabled(cfg: dict) -> bool:
+    """Whether ordinary assistant activity is enabled.
+
+    Missing values default to enabled (backward compatible); common string and
+    numeric falsy spellings are understood so a hand-edited config is honoured.
+    """
+    value = cfg.get("enabled", True)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "no", "off", "disabled")
+    return True
+
+
+def set_enabled(cfg: dict, enabled: bool) -> None:
+    """Persist the activation flag without touching any other setting."""
+    enabled = bool(enabled)
+    cfg["enabled"] = enabled
+    update_config({"enabled": enabled})
 
 
 def now() -> str:

@@ -6,6 +6,16 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **On/off control (`hyprwhispr power`).** `power status` reports the enabled
+  state, recording activity and model status (reusing `model status`); `power on`
+  flips a persistent `enabled` switch without loading the model; `power off`
+  refuses new push-to-talk/`ask`/`listen`/wake-word requests and recordings, then
+  releases the configured model once no recording is in progress. It never stops
+  the Ollama server or touches other models, and it reports only what `/api/ps`
+  confirms. The flag is stored in the existing config via an atomic
+  read-modify-write (`config.update_config`) that preserves all other keys; a
+  missing key means enabled, so existing configs keep working. Recordings, the
+  wake-word listener and assistant turns all respect the disabled state.
 - **Program discovery before launching.** Browser opening and application,
   terminal, Steam and OpenCode launches now verify that a suitable executable
   exists (user-configured value first, then `PATH`, then a small documented
