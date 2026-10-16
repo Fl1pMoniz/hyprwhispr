@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import apps, audio, config, session, speech
@@ -90,9 +91,19 @@ def _run_turn(cfg: dict, text: str) -> str:
     return answer
 
 
+def _transcribe_timed(cfg: dict, wav_path: str) -> tuple[str, str | None]:
+    """Transcribe and log the transcription duration (no transcript content)."""
+    started = time.perf_counter()
+    text, error = speech.transcribe(cfg, wav_path)
+    log_event({"event": "transcribe", "ms": round((time.perf_counter() - started) * 1000),
+               "ok": error is None and bool(text)})
+    return text, error
+
+
 def handle_wav(cfg: dict, wav_path: str) -> int:
     """Transcribe a recorded wav and answer it (runs in the detached worker)."""
-    text, error = speech.transcribe(cfg, wav_path)
+    pipeline_start = time.perf_counter()
+    text, error = _transcribe_timed(cfg, wav_path)
     if error:
         notify("Transcription failed", error, "critical")
         log_event({"event": "transcribe_error", "error": error})
@@ -110,6 +121,8 @@ def handle_wav(cfg: dict, wav_path: str) -> int:
         _cleanup_recording(cfg, wav_path)
         return 1
     show_answer(cfg, text, answer)
+    log_event({"event": "pipeline_total", "source": "process",
+               "ms": round((time.perf_counter() - pipeline_start) * 1000)})
     _cleanup_recording(cfg, wav_path)
     return 0
 
@@ -123,7 +136,7 @@ def listen(cfg: dict, seconds: int = 6) -> int:
     if not audio.record_seconds(cfg, seconds, wav):
         print("recorder failed to start - check the mic device name")
         return 1
-    text, error = speech.transcribe(cfg, wav)
+    text, error = _transcribe_timed(cfg, wav)
     if error:
         print("transcription error:", error)
         return 1

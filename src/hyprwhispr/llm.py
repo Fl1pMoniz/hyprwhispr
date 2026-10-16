@@ -87,6 +87,9 @@ def ollama_chat(cfg: dict, messages: list, tools_schema: list | None = None) -> 
         "keep_alive": cfg.get("keep_alive", "5m"),
         "options": {"num_ctx": cfg.get("num_ctx", 4096), "temperature": cfg.get("temperature", 0.3)},
     }
+    max_tokens = cfg.get("max_tokens")
+    if max_tokens:
+        payload["options"]["num_predict"] = int(max_tokens)
     if tools_schema:
         payload["tools"] = tools_schema
     try:
@@ -105,8 +108,32 @@ def ollama_chat(cfg: dict, messages: list, tools_schema: list | None = None) -> 
         raise
 
 
+def _is_tool_envelope(text: str) -> bool:
+    """True when *text* is exactly a JSON object naming a registered tool.
+
+    Used only to recognise a leaked tool-call payload. Prose that merely
+    contains JSON is never treated as one.
+    """
+    stripped = (text or "").strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(obj, dict):
+        return False
+    name = obj.get("tool") or obj.get("name")
+    return isinstance(name, str) and name in tools.TOOL_IMPL
+
+
 def clean_answer(text: str | None) -> str:
-    """Strip any chain-of-thought blocks a model may leak into its content."""
+    """Return the user-facing part of a model response.
+
+    Removes chain-of-thought blocks and leaked tool-call markup, and drops a
+    bare tool-call JSON envelope. This only affects the text shown to the user;
+    the structured data used by the executor is parsed from the raw response.
+    """
     if not text:
         return ""
     text = re.sub(r"(?is)<think(?:ing)?\b[^>]*>.*?</think(?:ing)?\s*>", "", text)
@@ -114,35 +141,83 @@ def clean_answer(text: str | None) -> str:
     if closes:
         text = text[closes[-1].end():]
     text = re.sub(r"(?is)<think(?:ing)?\b[^>]*>", "", text)
-    return text.strip()
+    # Some models occasionally echo a tool call as text instead of using native
+    # tool calling; strip that markup so the user never sees raw JSON in a reply.
+    text = re.sub(r"(?is)<tool_call>.*?(?:</tool_call>|$)", "", text)
+    text = re.sub(r"(?is)<\|tool_call\|>.*?(?:<\|/tool_call\|>|$)", "", text)
+    text = text.strip()
+    if _is_tool_envelope(text):
+        return ""
+    return text
+
+
+def _calls_from_obj(obj: object) -> list[dict]:
+    """Interpret a parsed JSON value as zero or more tool calls."""
+    if not isinstance(obj, dict):
+        return []
+    nested = obj.get("tool_calls")
+    if isinstance(nested, list):
+        calls: list[dict] = []
+        for item in nested:
+            calls += _calls_from_obj(item)
+        if calls:
+            return calls
+    function = obj.get("function")
+    if isinstance(function, dict) and isinstance(function.get("name"), str):
+        name = function["name"]
+        arguments = function.get("arguments", {})
+        if name in tools.TOOL_IMPL:
+            return [{"function": {"name": name,
+                                  "arguments": arguments if isinstance(arguments, dict) else {}}}]
+    name = obj.get("tool") or obj.get("name")
+    arguments = obj.get("arguments", obj.get("parameters", {}))
+    if isinstance(name, str) and name in tools.TOOL_IMPL:
+        return [{"function": {"name": name,
+                              "arguments": arguments if isinstance(arguments, dict) else {}}}]
+    return []
+
+
+def _calls_from_text(text: str | None) -> list[dict]:
+    """Parse the first JSON object in *text* and turn it into tool calls."""
+    if not text:
+        return []
+    brace = text.find("{")
+    if brace < 0:
+        return []
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[brace:])
+    except json.JSONDecodeError:
+        return []
+    return _calls_from_obj(obj)
 
 
 def parse_tool_json(content: str | None) -> list[dict]:
     """Fallback parser for a constrained JSON tool call in free text.
 
-    Strict: a candidate is only accepted when it parses to a JSON object whose
-    ``tool``/``name`` is a registered tool. Ordinary answers are never mistaken
-    for a tool call.
+    Only three shapes are accepted, all of them clearly machine tool-call
+    syntax: one or more ``<tool_call>…</tool_call>`` blocks, a fenced ``json``
+    block, or content that is itself a single JSON object. A JSON object
+    *embedded in prose* is never executed, so prose that merely mentions a tool
+    cannot trigger one.
     """
     if not content:
         return []
-    candidates: list[str] = []
-    candidates += [m.group(1) for m in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.S)]
-    candidates.append(content.strip())
-    brace = re.search(r"\{.*\}", content, re.S)
-    if brace:
-        candidates.append(brace.group(0))
-    for candidate in candidates:
-        try:
-            obj = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        name = obj.get("tool") or obj.get("name")
-        arguments = obj.get("arguments", obj.get("parameters", {}))
-        if isinstance(name, str) and name in tools.TOOL_IMPL:
-            return [{"function": {"name": name, "arguments": arguments if isinstance(arguments, dict) else {}}}]
+    calls: list[dict] = []
+    for match in re.finditer(r"(?is)<tool_call>\s*(\{.*?\})\s*</tool_call>", content):
+        calls += _calls_from_text(match.group(1))
+    if calls:
+        return calls
+    unclosed = re.search(r"(?is)<tool_call>\s*(\{.*)", content)
+    if unclosed:
+        calls = _calls_from_text(unclosed.group(1))
+    if calls:
+        return calls
+    for match in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.S):
+        calls += _calls_from_text(match.group(1))
+    if calls:
+        return calls
+    if content.strip().startswith("{"):
+        return _calls_from_text(content.strip())
     return []
 
 
@@ -177,19 +252,70 @@ def _coerce_arguments(arguments: object) -> dict:
     return {}
 
 
+RETRY_NUDGE = ("Reply now with one short plain-text sentence for the user. "
+               "Do not output JSON, tool calls, code fences or internal markup.")
+
+
 def _fallback_answer(results: list[str]) -> str:
     for result in reversed(results):
         if isinstance(result, str) and result.startswith("error"):
             return f"I couldn't complete that: {result[len('error'):].strip()}"
+    if results:
+        return "Done."  # a tool result confirmed the action, so this is truthful
     return "I couldn't complete that request."
 
 
-def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict | None = None) -> str:
+def _final_answer(cfg: dict, messages: list, content: str, results: list[str]) -> tuple[str, float, int]:
+    """Produce the user-facing answer. Returns ``(text, extra_llm_ms, extra_calls)``.
+
+    If the response carried only internal markup/data (no user text), make one
+    bounded retry asking for plain text; otherwise return a safe fallback. The
+    retry cost is reported so callers can account for it in their metrics.
+    """
+    text = clean_answer(content)
+    if text:
+        return text, 0.0, 0
+    if content and content.strip():  # only internal tool-call/thinking data
+        started = time.perf_counter()
+        try:
+            retry = ollama_chat(cfg, messages + [{"role": "system", "content": RETRY_NUDGE}], None)
+        except Exception:  # noqa: BLE001 - never let the fallback path crash a turn
+            return _fallback_answer(results), (time.perf_counter() - started) * 1000, 1
+        retried = clean_answer(retry.get("message", {}).get("content"))
+        return (retried or _fallback_answer(results)), (time.perf_counter() - started) * 1000, 1
+    return "(no answer)", 0.0, 0
+
+
+def _log_turn(step: int, llm_calls: int, tool_calls: int, llm_total: float, tool_total: float,
+              turn_start: float, exhausted: bool, metrics: dict | None,
+              llm_call_ms: list[int] | None = None) -> None:
+    """Record turn timing without any transcript, prompt or output content."""
+    record = {
+        "event": "turn",
+        "steps": step,
+        "llm_calls": llm_calls,
+        "tool_calls": tool_calls,
+        "llm_ms": round(llm_total * 1000),
+        "tool_ms": round(tool_total * 1000),
+        "total_ms": round((time.perf_counter() - turn_start) * 1000),
+    }
+    if llm_call_ms is not None:
+        record["llm_call_ms"] = llm_call_ms
+    if exhausted:
+        record["exhausted"] = True
+    log_event(record)
+    if metrics is not None:
+        metrics.update(record)
+
+
+def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict | None = None,
+                 metrics: dict | None = None) -> str:
     """Answer one user turn, running any tools the model asks for.
 
     ``state`` is the mutable conversation state (see :mod:`hyprwhispr.session`);
     the caller is responsible for saving it. When omitted, a throwaway state is
-    used so the function still works standalone.
+    used so the function still works standalone. When ``metrics`` is a dict, it
+    is filled with stage timings (no content).
     """
     if not text.strip():
         return "I didn't catch that."
@@ -208,17 +334,49 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
     seen_calls: set[tuple] = set()
     results: list[str] = []
     tool_calls_made = 0
+    llm_calls = 0
+    llm_total = 0.0
+    llm_call_ms: list[int] = []
+    llm_prompt_tokens = 0
+    llm_eval_tokens = 0
+    llm_load_ms = 0.0
+    tool_total = 0.0
     turn_start = time.perf_counter()
 
-    for step in range(steps):
+    def _chat(msgs: list, schema: list | None):
+        """Time one Ollama request; record duration and token counts (no content)."""
+        nonlocal llm_total, llm_calls, llm_prompt_tokens, llm_eval_tokens, llm_load_ms
         started = time.perf_counter()
         try:
-            response = ollama_chat(cfg, messages, tools.TOOLS_SCHEMA if use_tools else None)
+            response = ollama_chat(cfg, msgs, schema)
+        finally:
+            elapsed = time.perf_counter() - started
+            llm_total += elapsed
+            llm_calls += 1
+            llm_call_ms.append(round(elapsed * 1000))
+        try:  # Ollama reports these as top-level, non-content fields
+            llm_prompt_tokens += int(response.get("prompt_eval_count") or 0)
+            llm_eval_tokens += int(response.get("eval_count") or 0)
+            llm_load_ms += int(response.get("load_duration") or 0) / 1_000_000
+        except (TypeError, ValueError):
+            pass
+        return response
+
+    def _finish(step: int, exhausted: bool):
+        _log_turn(step, llm_calls, tool_calls_made, llm_total, tool_total,
+                  turn_start, exhausted=exhausted, metrics=metrics, llm_call_ms=llm_call_ms)
+        if metrics is not None:
+            metrics.update({"llm_prompt_tokens": llm_prompt_tokens,
+                            "llm_eval_tokens": llm_eval_tokens,
+                            "llm_load_ms": round(llm_load_ms)})
+
+    for step in range(steps):
+        try:
+            response = _chat(messages, tools.TOOLS_SCHEMA if use_tools else None)
         except ToolsUnsupported:
             use_tools = False
             messages.insert(1, {"role": "system", "content": JSON_TOOL_INSTRUCTION + ", ".join(tools.TOOL_IMPL)})
-            response = ollama_chat(cfg, messages, None)
-        llm_ms = round((time.perf_counter() - started) * 1000)
+            response = _chat(messages, None)
 
         message = response.get("message", {})
         content = message.get("content") or ""
@@ -227,10 +385,13 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
             calls = parse_tool_json(content)
 
         if not calls:
-            answer = clean_answer(content) or "(no answer)"
+            answer, extra_ms, extra_calls = _final_answer(cfg, messages, content, results)
+            if extra_calls:
+                llm_total += extra_ms / 1000
+                llm_calls += extra_calls
+                llm_call_ms.append(round(extra_ms))
             session.append_turn(state, "assistant", answer, history_limit)
-            log_event({"event": "turn", "steps": step + 1, "tool_calls": tool_calls_made,
-                       "llm_ms": llm_ms, "total_ms": round((time.perf_counter() - turn_start) * 1000)})
+            _finish(step + 1, exhausted=False)
             return answer
 
         messages.append({"role": "assistant", "content": content, "tool_calls": calls})
@@ -244,7 +405,9 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
                                  "tool_name": name})
                 continue
             seen_calls.add(key)
+            call_started = time.perf_counter()
             result = str(tools.dispatch_tool(cfg, name, arguments))
+            tool_total += time.perf_counter() - call_started
             session.note_tool(state, name, arguments, result)
             if result.startswith(apps.AMBIGUOUS_PREFIX):
                 session.set_pending(state, apps.parse_ambiguous(result))
@@ -253,9 +416,12 @@ def run_pipeline(cfg: dict, text: str, max_steps: int | None = None, state: dict
             messages.append({"role": "tool", "content": result, "tool_name": name})
 
     # Budget exhausted: ask for an answer without tools so we never stall.
-    final = ollama_chat(cfg, messages, None)
-    answer = clean_answer(final.get("message", {}).get("content")) or _fallback_answer(results)
+    final = _chat(messages, None)
+    answer, extra_ms, extra_calls = _final_answer(cfg, messages, final.get("message", {}).get("content") or "", results)
+    if extra_calls:
+        llm_total += extra_ms / 1000
+        llm_calls += extra_calls
+        llm_call_ms.append(round(extra_ms))
     session.append_turn(state, "assistant", answer, history_limit)
-    log_event({"event": "turn", "steps": steps, "tool_calls": tool_calls_made, "exhausted": True,
-               "total_ms": round((time.perf_counter() - turn_start) * 1000)})
+    _finish(steps, exhausted=True)
     return answer

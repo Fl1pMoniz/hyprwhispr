@@ -13,6 +13,16 @@ based on [Keep a Changelog](https://keepachangelog.com/).
   stay in the spoken language (transcription mode is used, never translation).
 - `speech.resolve_language` / `speech.build_command` with a format check for
   explicit language codes (any short ISO-639 code is passed through to whisper).
+- Benchmark extensions: multilingual fixtures (pt/es/de/it/ar/ja/zh), a separate
+  transcription-latency mode (`--transcribe FILE.wav`), a multilingual-subset
+  accuracy line, a script-based answer-language signal for non-Latin replies, a
+  per-stage latency breakdown (total/LLM/tool/per-call), and optional word-error
+  rate over local recordings (`--wer MANIFEST`).
+- Optional `max_tokens` config (Ollama `num_predict`) to cap generated tokens per
+  reply; `null` by default. Capping bounds worst-case latency but can hurt
+  tool-selection accuracy at low values - measure with the benchmark first.
+- Per-turn timing instrumentation (total, LLM, tool, per-call durations, and
+  prompt/eval token counts) recorded in the audit log with no transcript content.
 
 ### Changed
 - `scripts/download-models.sh` defaults to the multilingual model, downloads to a
@@ -21,6 +31,17 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - `scripts/verify.sh` checks for the multilingual model and warns if only the
   English-only model is present.
 - Ollama system prompt instructs the assistant to reply in the user's language.
+- Tool-call JSON is only parsed from clear machine syntax (`<tool_call>` blocks, a
+  fenced `json` block, or content that is itself a JSON object); a JSON object
+  embedded in prose is no longer executed.
+
+### Fixed
+- Strip leaked `<tool_call>` markup and bare tool-call JSON envelopes from a reply
+  so a model that echoes a tool call as text can no longer show raw JSON to the
+  user; when nothing user-facing remains, make one bounded retry and then fall
+  back to a short safe message.
+- `scripts/benchmark.py` no longer leaves a patched model in the process after a
+  fake-mode run (it now always restores `llm.ollama_chat`).
 
 ## [1.1.0] - 2026-10-16
 

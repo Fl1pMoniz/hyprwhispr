@@ -117,8 +117,13 @@ def record_stop(cfg: dict) -> int:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    held_ms = None
+    try:  # approximate how long the key was held, from the pidfile's mtime
+        held_ms = round((time.time() - config.PIDFILE.stat().st_mtime) * 1000)
+    except OSError:
+        pass
     config.PIDFILE.unlink(missing_ok=True)
-    log_event({"event": "record_stop", "pid": pid})
+    log_event({"event": "record_stop", "pid": pid, "held_ms": held_ms})
 
     if not config.WAVFILE.exists() or config.WAVFILE.stat().st_size < 2000:
         notify("Nothing recorded", "The clip was too short - hold the key while you speak.")

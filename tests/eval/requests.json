@@ -16,5 +16,15 @@
   {"text": "How do I close Steam?", "expect": "answer"},
   {"text": "Don't open Steam.", "expect": "answer"},
   {"text": "Open the editor.", "expect_tools": ["open_app"]},
-  {"text": "Delete the old files.", "expect": "clarify"}
+  {"text": "Delete the old files.", "expect": "clarify"},
+
+  {"text": "Abrir o Firefox.", "lang": "pt", "expect_tools": ["open_app"], "expect_arg": "firefox"},
+  {"text": "Fechar o Steam.", "lang": "pt", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "Abre el navegador.", "lang": "es", "expect_tools": ["open_app"]},
+  {"text": "Öffne den Browser.", "lang": "de", "expect_tools": ["open_app"]},
+  {"text": "Chiudi Steam.", "lang": "it", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "Apri il browser.", "lang": "it", "expect_tools": ["open_app"]},
+  {"text": "افتح المتصفح.", "lang": "ar", "expect_tools": ["open_app"], "expect_script": "arabic"},
+  {"text": "ブラウザを開いて。", "lang": "ja", "expect_tools": ["open_app", "list_apps"], "expect_script": "cjk"},
+  {"text": "打开浏览器。", "lang": "zh", "expect_tools": ["open_app"], "expect_script": "cjk"}
 ]

@@ -28,6 +28,7 @@ environment variables:
 | `keep_alive` | `5m` | how long Ollama keeps the model in VRAM after a turn |
 | `num_ctx` | `4096` | context window |
 | `temperature` | `0.3` | sampling temperature |
+| `max_tokens` | `null` | optional cap on generated tokens per reply (Ollama `num_predict`); `null` = no cap. Bounds worst-case latency but can truncate and hurt tool selection at low values - test with `scripts/benchmark.py` first |
 | `request_timeout` | `120` | seconds allowed per model request |
 | `max_tool_steps` | `5` | agent-loop iterations before the model is forced to answer |
 | `tool_mode` | `auto` | `auto` (native function calling, JSON fallback), `native`, or `json` |

@@ -232,18 +232,28 @@ scripted fake model, so it never touches your real desktop, microphone or GPU.
 
 ### Benchmark
 
-`scripts/benchmark.py` measures tool selection over a fixed set of requests
-(`tests/eval/requests.json`). It runs offline by default (harness check) and
-against the real local model with `--live`; in both cases tools are recorded,
-never executed:
+`scripts/benchmark.py` measures tool selection over a fixed set of **text**
+requests (`tests/eval/requests.json`) — including multilingual fixtures. It runs
+offline by default (harness check) and against the real local model with
+`--live`; in both cases tools are recorded, never executed:
 
 ```bash
-python scripts/benchmark.py         # harness, no model
-python scripts/benchmark.py --live  # real local model
+python scripts/benchmark.py                     # harness, no model
+python scripts/benchmark.py --live              # real local model
+python scripts/benchmark.py --transcribe a.wav  # time one transcription
+python scripts/benchmark.py --wer manifest.json # word error rate vs references
 ```
 
-It reports tool-selection accuracy, argument accuracy, clarification rate,
-unsafe-action rate, LLM calls per task, and latency (median / p95).
+It reports tool-selection accuracy (overall and multilingual subset), argument
+accuracy, clarification rate, unsafe-action rate, LLM calls per task, latency
+(median / p95 with sample counts and a per-stage total/LLM/tool breakdown), and -
+for a live model - whether non-Latin replies use the expected script.
+
+**Scope:** the text fixtures measure the *assistant*, not speech recognition (no
+audio or Whisper is involved). Transcription is measured separately with
+`--transcribe`, and word error rate only with `--wer` and a manifest that pairs
+local recordings with reference transcripts. Script checks can confirm a writing
+system but not that an answer is grammatical or truly in the requested language.
 
 ## Troubleshooting
 

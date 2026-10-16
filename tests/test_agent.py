@@ -157,3 +157,56 @@ def test_empty_model_output_returns_placeholder(monkeypatch):
     monkeypatch.setattr(llm, "ollama_chat", FakeModel([text_response("")]))
     patch_dispatch(monkeypatch)
     assert llm.run_pipeline({}, "hello") == "(no answer)"
+
+
+def test_multiple_tool_calls_in_one_response(monkeypatch):
+    model = FakeModel([
+        {"message": {"content": "", "tool_calls": [
+            {"function": {"name": "open_app", "arguments": {"app": "Firefox"}}},
+            {"function": {"name": "open_app", "arguments": {"app": "kitty"}}},
+        ]}},
+        text_response("done"),
+    ])
+    monkeypatch.setattr(llm, "ollama_chat", model)
+    calls = patch_dispatch(monkeypatch, result="opened")
+    assert llm.run_pipeline({}, "open two apps") == "done"
+    assert [c[1].get("app") for c in calls] == ["Firefox", "kitty"]
+
+
+def test_prose_mentioning_a_tool_does_not_execute(monkeypatch):
+    model = FakeModel([text_response('Just call {"name": "open_app", "arguments": {"app": "x"}} when ready.')])
+    monkeypatch.setattr(llm, "ollama_chat", model)
+    calls = patch_dispatch(monkeypatch)
+    llm.run_pipeline({}, "how do I open an app?")
+    assert calls == []
+
+
+def test_leaked_tool_markup_returns_safe_fallback(monkeypatch):
+    markup = '<tool_call>{"name": "not_a_tool", "arguments": {}}</tool_call>'
+    model = FakeModel([text_response(markup), text_response(markup)])
+    monkeypatch.setattr(llm, "ollama_chat", model)
+    patch_dispatch(monkeypatch)
+    answer = llm.run_pipeline({}, "do something")
+    assert answer and "tool_call" not in answer and "{" not in answer
+
+
+def test_exhausted_budget_with_only_envelope_falls_back(monkeypatch):
+    envelope = '{"name": "open_app", "arguments": {"app": "x"}}'
+    responses = [tool_response("list_apps", query="a"), tool_response("list_apps", query="b"),
+                 text_response(envelope), text_response(envelope)]
+    model = FakeModel(responses)
+    monkeypatch.setattr(llm, "ollama_chat", model)
+    patch_dispatch(monkeypatch, result="ok")
+    answer = llm.run_pipeline({}, "go", max_steps=2)
+    assert answer and "{" not in answer and "open_app" not in answer
+
+
+def test_run_pipeline_reports_timings_without_content(monkeypatch):
+    model = FakeModel([tool_response("open_app", app="Firefox"), text_response("Opened.")])
+    monkeypatch.setattr(llm, "ollama_chat", model)
+    patch_dispatch(monkeypatch, result="opened Firefox")
+    metrics = {}
+    llm.run_pipeline({}, "open firefox", metrics=metrics)
+    assert {"steps", "llm_calls", "tool_calls", "llm_ms", "tool_ms", "total_ms"} <= set(metrics)
+    # instrumentation must not carry user content
+    assert all("firefox" not in str(value).lower() for value in metrics.values())

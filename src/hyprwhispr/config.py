@@ -68,6 +68,9 @@ DEFAULTS = {
     "keep_alive": "5m",
     "num_ctx": 4096,
     "temperature": 0.3,
+    # Optional cap on generated tokens per reply (Ollama num_predict). null = no
+    # cap. A cap bounds worst-case latency on models that sometimes ramble.
+    "max_tokens": None,
     "request_timeout": 120,        # seconds per model request
     "max_tool_steps": 5,           # agent loop iterations before forcing an answer
     "tool_mode": "auto",           # "auto" | "native" | "json" (see docs/architecture.md)
