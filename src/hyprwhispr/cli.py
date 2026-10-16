@@ -10,6 +10,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
+import sys
 
 from . import apps, audio, config, speech
 from .llm import run_pipeline
@@ -126,7 +127,9 @@ def show_last() -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
     config.ensure_dirs()
     cfg = config.load_config()
     if not argv:
