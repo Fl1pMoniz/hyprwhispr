@@ -66,3 +66,12 @@ def test_existing_verified_model_is_kept(tmp_path):
     result, final = _run(tmp_path, source.as_uri(), _sha(source))
     assert result.returncode == 0
     assert "already present" in (result.stdout + result.stderr)
+
+
+def test_interrupted_download_leaves_no_partial(tmp_path):
+    # A source that cannot be fetched must fail and leave no .part behind.
+    missing = (tmp_path / "does-not-exist.bin").as_uri()
+    result, final = _run(tmp_path, missing, "0" * 64)
+    assert result.returncode != 0
+    assert not final.exists()
+    assert not final.with_name(final.name + ".part").exists()

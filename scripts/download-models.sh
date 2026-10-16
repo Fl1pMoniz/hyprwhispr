@@ -37,6 +37,9 @@ EXPECTED_SHA256="${WHISPER_MODEL_SHA256:-$PINNED_SHA256}"
 command -v curl >/dev/null 2>&1 || { echo "error: 'curl' is required" >&2; exit 1; }
 mkdir -p "$MODEL_DIR"
 
+# Never leave a partial download behind on failure or interruption.
+trap 'rm -f "$MODEL_FILE.part"' EXIT
+
 sha_of() { sha256sum "$1" | awk '{print $1}'; }
 
 # Already installed (and, when a checksum is known, intact)?

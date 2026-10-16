@@ -83,10 +83,60 @@ against a small, expiring session file.
 Tested on Nobara/Fedora 44 with Hyprland. Other compositors are supported only if
 they provide equivalent press/release keybindings.
 
-## Installation (from a fresh checkout)
+## Installation
+
+### Fedora / Nobara (recommended)
 
 ```bash
-git clone https://github.com/<you>/hyprwhispr.git
+git clone https://github.com/Fl1pMoniz/hyprwhispr.git
+cd hyprwhispr
+./scripts/install.sh
+```
+
+The installer detects your system, prints a PASS/WARN/FAIL summary of what is
+missing, and then — with your confirmation — does as much as it safely can:
+
+- installs missing system packages with `dnf` (`pipewire-utils`, `libnotify`,
+  `pipx`, build tools, and optional helpers);
+- installs the `hyprwhispr` Python app with `pipx` (or a virtualenv fallback);
+- pulls the Ollama model, builds whisper.cpp at a pinned revision, and downloads
+  the multilingual Whisper model (both verified by checksum);
+- creates `~/.config/hyprwhispr/config.json` **only if it is missing** and writes
+  a Hyprland binding **snippet** only if you confirm.
+
+It is idempotent: re-running it reuses what already works and changes nothing else.
+
+| Flag | Effect |
+|---|---|
+| `--check` | Read-only dependency report (PASS/WARN/FAIL) |
+| `--dry-run` | Show exactly what would happen, changing nothing |
+| `--yes` | Non-interactive: accept the supported prompts |
+| `--no-model-download` | Skip the Ollama and Whisper model downloads |
+| `--help` | Usage |
+
+**Automatic:** Fedora/Nobara packages, the Python app, and the local models.
+**Never:** installing a desktop environment, overwriting your config, editing your
+Hyprland configuration, or running remote scripts as root.
+**May need you:** installing Ollama itself
+(https://ollama.com/download/linux) and adding the Hyprland keybinding.
+
+**Supported:** Fedora Workstation, Fedora with Hyprland, and Nobara, using `dnf`.
+Fedora-derived systems using `dnf` are treated as Fedora (untested). **Not
+supported:** Fedora Atomic / image-based variants (Silverblue, Kinoite, Bazzite,
+…) — the installer stops and points you to `rpm-ostree`/toolbox; and non-Fedora
+distributions, where it exits without making changes.
+
+After installing:
+
+```bash
+scripts/verify.sh          # runtime dependency check
+hyprwhispr listen 6        # record, transcribe, answer (after login)
+```
+
+### Manual installation (any Fedora/Nobara)
+
+```bash
+git clone https://github.com/Fl1pMoniz/hyprwhispr.git
 cd hyprwhispr
 
 # 1. Install the Python package (no runtime dependencies).
@@ -107,8 +157,8 @@ scripts/verify.sh
 ```
 
 If Ollama is not installed, get it from its official Linux page
-(https://ollama.com/download/linux) — the setup script will tell you if it is
-missing rather than running a remote installer for you.
+(https://ollama.com/download/linux) — the installer and setup script tell you it
+is missing rather than running a remote installer for you.
 
 ### Bind hold-to-talk in Hyprland
 
@@ -280,8 +330,9 @@ scripts/uninstall.sh                 # removes data + config (asks first)
 pipx uninstall hyprwhispr            # or: pip uninstall hyprwhispr
 ```
 
-Then remove the binding from your Hyprland config and `hyprctl reload`. Ollama,
-its models, and OpenCode are not touched.
+Then remove the hold-to-talk binding (and any `~/.config/hypr/hyprwhispr.conf`
+snippet and its `source =` line the installer may have written) and reload:
+`hyprctl reload`. Uninstalling never removes Ollama, its models, or OpenCode.
 
 ## Contributing
 

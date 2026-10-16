@@ -6,6 +6,13 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Fedora/Nobara installer** (`scripts/install.sh`): guided, idempotent setup
+  with `--check` (read-only report), `--dry-run`, `--yes` and
+  `--no-model-download`. It detects Fedora, Nobara, Fedora-derived and Atomic
+  variants, installs missing `dnf` packages, the Python app (pipx or a venv
+  fallback), the Ollama and Whisper models, whisper.cpp, the config, and offers a
+  Hyprland binding snippet - without ever overwriting config or editing Hyprland.
+  Atomic variants and non-Fedora systems are refused without changes.
 - **Automatic multilingual speech recognition.** Default model is now the
   multilingual `ggml-small.bin` and `language` defaults to `null` (whisper's
   built-in auto-detection, `-l auto`). Speak Portuguese, Ukrainian, English,
