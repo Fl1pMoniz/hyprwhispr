@@ -110,6 +110,21 @@ DEFAULTS = {
     # --- logging privacy ---
     "log_transcripts": False,      # do not write transcript text to exchanges.log by default
     "log_tool_args": False,        # do not write tool arguments to the audit log by default
+    # --- wake word (optional; disabled by default) ---
+    # activation: "shortcut" (keyboard only, default) | "wake_word" | "both" | "disabled"
+    "wake_word_mode": "shortcut",
+    "wake_word": "дідько",         # exact Unicode phrase (Ukrainian); preserved verbatim
+    "wake_word_models": {},        # phrase -> openWakeWord model id or path
+    "wake_word_threshold": 0.5,    # detection score threshold (0..1)
+    "wake_word_cooldown_seconds": 2.0,
+    "wake_word_command_seconds": 6,  # bounded command-listening window after activation
+    "wake_word_feedback": True,    # brief local notification on detection
+    "wake_word_device": None,      # optional sounddevice input device name/index
+    # detection backend: "auto" (prefer a matching openWakeWord model, else whisper),
+    # "whisper" (reuse local whisper.cpp; works for any language, higher CPU), or
+    # "openwakeword" (lower CPU; English pretrained or a custom model).
+    "wake_word_engine": "auto",
+    "wake_word_window_seconds": 2.5,  # rolling audio window for the whisper engine
 }
 
 

@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import apps, audio, config, session, speech
+from . import apps, audio, config, session, speech, wakeword
 from .llm import run_pipeline
 from .notify import log_event, notify
 
@@ -47,6 +47,15 @@ Applications and games:
 Conversation:
   session                   show the current conversation context
   session clear             forget the conversation context
+
+Activation (optional wake word; disabled by default):
+  wake-word show            show the mode, wake word and capability
+  wake-word set <phrase>    set the wake word (does not enable it)
+  wake-word enable          enable wake word (mode: both, keeps the shortcut)
+  wake-word disable         return to shortcut-only (mode: shortcut)
+  wake-word mode <mode>     shortcut | wake_word | both | disabled
+  wake-word check           check the engine/model for the configured phrase
+  wake-word listen          run the wake-word listener in the foreground
 
 Setup:
   list-mics                 show audio input devices
@@ -89,6 +98,17 @@ def _run_turn(cfg: dict, text: str) -> str:
     answer = run_pipeline(cfg, text, state=state)
     session.save(cfg, state)
     return answer
+
+
+def _answer_text(cfg: dict, text: str) -> None:
+    """Answer a text command (used for one-stage wake-word utterances)."""
+    try:
+        answer = _run_turn(cfg, text)
+    except Exception as exc:  # noqa: BLE001
+        notify("Assistant error", f"Local model call failed: {exc}", "critical")
+        return
+    show_answer(cfg, text, answer)
+    print("Assistant:", answer)
 
 
 def _transcribe_timed(cfg: dict, wav_path: str) -> tuple[str, str | None]:
@@ -175,6 +195,79 @@ def show_last() -> int:
     return 0
 
 
+def wake_word_command(cfg: dict, rest: list[str]) -> int:
+    """Manage the optional wake-word activation (see docs/wake-word.md)."""
+    sub = rest[0] if rest else "show"
+
+    if sub == "show":
+        settings = wakeword.get_settings(cfg)
+        cap = wakeword.capability(cfg)
+        print(f"mode: {settings.mode}")
+        print(f"wake word: {settings.phrase}")
+        print(f"engine: {wakeword.select_engine(cfg)} "
+              f"(openWakeWord {'installed' if wakeword.engine_available() else 'not installed'})")
+        print(f"capability: {cap['status']} - {cap['message']}")
+        if settings.models:
+            print(f"model mapping: {settings.models}")
+        return 0
+
+    if sub == "set":
+        phrase = " ".join(rest[1:])
+        clean, error = wakeword.validate_phrase(phrase)
+        if error:
+            print(f"error: {error}")
+            return 2
+        cfg["wake_word"] = clean
+        config.save_config(cfg)
+        cap = wakeword.capability(cfg)
+        print(f"wake word set to \u201c{clean}\u201d (activation mode unchanged: {wakeword.get_settings(cfg).mode})")
+        print(f"capability: {cap['status']} - {cap['message']}")
+        return 0
+
+    if sub in ("enable", "disable", "mode"):
+        if sub == "enable":
+            mode = "both"
+        elif sub == "disable":
+            mode = "shortcut"
+        elif len(rest) >= 2:
+            mode = rest[1]
+        else:
+            print("usage: hyprwhispr wake-word mode <shortcut|wake_word|both|disabled>")
+            return 2
+        _, error = wakeword.validate_mode(mode)
+        if error:
+            print(f"error: {error}")
+            return 2
+        cfg["wake_word_mode"] = mode
+        config.save_config(cfg)
+        print(f"wake word mode set to '{mode}'")
+        if mode in ("wake_word", "both"):
+            cap = wakeword.capability(cfg)
+            print(f"capability: {cap['status']} - {cap['message']}")
+            if cap["status"] not in ("whisper", "pretrained", "configured"):
+                print("note: listening will not start until this is resolved; push-to-talk still works.")
+        return 0
+
+    if sub == "check":
+        cap = wakeword.capability(cfg)
+        print(f"phrase: {cap['phrase']}")
+        print(f"engine: {wakeword.select_engine(cfg)} "
+              f"(openWakeWord {'installed' if wakeword.engine_available() else 'not installed'})")
+        print(f"status: {cap['status']}")
+        print(f"message: {cap['message']}")
+        return 0 if cap["status"] in ("whisper", "pretrained", "configured") else 1
+
+    if sub == "listen":
+        try:
+            return wakeword.run_listen(cfg, lambda c, wav: handle_wav(c, wav), text_handler=_answer_text)
+        except wakeword.WakeWordError as exc:
+            print(f"error: {exc}")
+            return 1
+
+    print("usage: hyprwhispr wake-word [show|set|enable|disable|mode|check|listen]")
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -245,6 +338,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(json.dumps(session.load(cfg), indent=2, ensure_ascii=False))
         return 0
+
+    if command == "wake-word":
+        return wake_word_command(cfg, rest)
 
     if command == "model":
         if rest:

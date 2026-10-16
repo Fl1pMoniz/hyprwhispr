@@ -318,3 +318,24 @@ def test_failed_whisper_build_is_reported_as_failure(tmp_path):
     assert result.returncode != 0
     assert "whisper" in result.stdout.lower()
     assert "failed" in result.stdout.lower() or "missing" in result.stdout.lower()
+
+
+def test_check_reports_wake_word_option(tmp_path):
+    result = run_cli(tmp_path, ["--check"])
+    assert "wake-word" in result.stdout.lower() or "wake word" in result.stdout.lower()
+
+
+def test_dry_run_with_wake_word_injects_nothing(tmp_path):
+    bindir = tmp_path / "fakebin"
+    sentinel = tmp_path / "INJECTED"
+    _write_bin(bindir, "pipx", (
+        'case "${1:-}" in\n'
+        '  list) echo "hyprwhispr 1.1.0"; exit 0 ;;\n'
+        f'  inject) touch "{sentinel}"; exit 0 ;;\n'
+        '  *) exit 0 ;;\n'
+        'esac\n'
+    ))
+    path = f"{bindir}:/usr/bin:/bin"
+    result = run_cli(tmp_path, ["--dry-run", "--with-wake-word"], path=path, env_extra={"PATH": path})
+    assert "wake-word engine" in result.stdout.lower()
+    assert not sentinel.exists(), "dry-run must not install the wake-word engine"

@@ -56,6 +56,29 @@ def probe_wav(path: pathlib.Path) -> tuple[int, float]:
     return duration_ms, 20 * math.log10(peak / 32768.0)
 
 
+def write_wav(path: pathlib.Path, frames, rate: int = 16000, channels: int = 1,
+              width: int = 2) -> pathlib.Path:
+    """Write 16-bit PCM frames to a WAV file.
+
+    ``frames`` is an iterable of per-frame sample sequences (plain lists, the
+    stdlib ``array`` type, or numpy int16 arrays). Kept dependency-free.
+    """
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(width)
+        wav.setframerate(rate)
+        for frame in frames:
+            if hasattr(frame, "tobytes"):  # numpy array
+                if str(getattr(frame, "dtype", "int16")) != "int16":
+                    frame = frame.astype("int16")
+                wav.writeframes(frame.tobytes())
+            else:
+                wav.writeframes(array.array("h", frame).tobytes())
+    return path
+
+
 def _recorder_command(cfg: dict, output: pathlib.Path) -> list[str]:
     recorder = shutil.which(cfg["recorder"]) or cfg["recorder"]
     cmd = [recorder, "--rate", str(cfg["sample_rate"]), "--channels", "1", "--format", "s16"]

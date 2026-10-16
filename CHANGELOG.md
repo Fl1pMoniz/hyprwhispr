@@ -6,6 +6,18 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Optional wake word** (disabled by default). Activation modes `shortcut`
+  (default), `wake_word`, `both`, `disabled`; a configurable phrase stored verbatim
+  with the exact Ukrainian default `дідько` (disabled; a mild, humorous curse); a pluggable detector interface with **two**
+  backends — a default **whisper** engine that reuses the local whisper.cpp model
+  (any language/phrase such as `дідько`, no training needed, higher CPU) and an
+  optional lower-CPU **openWakeWord** engine (English pretrained or custom-trained
+  model) — selected via `wake_word_engine` (`auto`/`whisper`/`openwakeword`); a
+  foreground `wake-word listen` loop with no daemon and one-stage/two-stage
+  interaction; capability reporting that truthfully distinguishes engine support;
+  the new `wake-word` CLI (`show`/`set`/`enable`/`disable`/`mode`/`check`/`listen`)
+  and an opt-in installer flag `--with-wake-word`. Detection is local; no audio
+  leaves the machine.
 - **Fedora/Nobara installer** (`scripts/install.sh`): guided, idempotent setup
   with `--check` (read-only report), `--dry-run`, `--yes` and
   `--no-model-download`. It detects Fedora, Nobara, Fedora-derived and Atomic

@@ -26,6 +26,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# Optional lower-CPU wake-word engine (openWakeWord code is Apache-2.0; its
+# pre-trained models are CC-BY-NC-SA-4.0 and English-only). The default wake-word
+# engine reuses whisper.cpp and needs no extra package. See docs/wake-word.md.
+wakeword = ["openwakeword"]
 
 [project.scripts]
 hyprwhispr = "hyprwhispr.cli:main"

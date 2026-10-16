@@ -15,6 +15,21 @@ library only, and small enough to read in an afternoon.
 
 > Status: usable and tested, but young. See `CHANGELOG.md`.
 
+## Ukraine support 🇺🇦
+
+HyprWhispr is built to work in **Ukrainian**, not just English:
+
+- 🇺🇦 **Speech and replies** — the multilingual model recognises Ukrainian and the
+  assistant answers in Ukrainian; Ukrainian is exercised end-to-end by the language
+  tests (`tests/test_multilingual.py`).
+- **Ukrainian by default around activation** — the default wake word is the
+  Ukrainian exclamation `дідько` ("the devil", a mild and tongue-in-cheek curse),
+  and 🇺🇦 Ukrainian sits in the language list.
+- **Local and private** — recognition and inference run on your machine; no audio
+  or text is sent to a cloud service.
+
+Слава Україні! 🇺🇦
+
 ## Goals and design principles
 
 - **Local-first.** No cloud speech recognition, no cloud LLM, no telemetry.
@@ -36,6 +51,10 @@ library only, and small enough to read in an afternoon.
   🇬🇧 English, 🇪🇸 Spanish, 🇫🇷 French, 🇩🇪 German, 🇮🇹 Italian, 🇸🇦 Arabic,
   🇯🇵 Japanese, 🇨🇳 Chinese and more; whisper detects the language and the reply
   stays in it. Pin a language with `"language": "pt"`.
+- **Optional wake word** — activate hands-free with a configurable phrase
+  (disabled by default; the Ukrainian default is `дідько`). Detected locally by
+  reusing whisper (no training) or the optional lower-CPU openWakeWord engine. See
+  [docs/wake-word.md](docs/wake-word.md).
 - **Local inference** through Ollama, with a configurable model (default
   `qwen3:4b`).
 - **Natural-language tool calling** — varied phrasing ("can you bring up my
@@ -112,6 +131,7 @@ It is idempotent: re-running it reuses what already works and changes nothing el
 | `--dry-run` | Show exactly what would happen, changing nothing |
 | `--yes` | Non-interactive: accept the supported prompts |
 | `--no-model-download` | Skip the Ollama and Whisper model downloads |
+| `--with-wake-word` | Also install the optional wake-word engine (openWakeWord) |
 | `--help` | Usage |
 
 **Automatic:** Fedora/Nobara packages, the Python app, and the local models.
@@ -256,6 +276,25 @@ Each turn logs per-stage timings (total, LLM, tool, per-call and token counts) �
 numbers only. Investigate with `python scripts/benchmark.py --live`, and bound
 worst-case generation with the optional `"max_tokens"` setting: **measure first**,
 because a low cap trades tool-selection accuracy for speed.
+
+### Wake word (optional)
+
+Disabled by default. Enable hands-free activation with a configurable phrase (the
+default is `дідько`):
+
+```bash
+hyprwhispr wake-word set "дідько"     # change the phrase (does not enable it)
+hyprwhispr wake-word enable         # mode = both (keeps the keyboard shortcut)
+hyprwhispr wake-word listen         # run the listener in the foreground
+hyprwhispr wake-word disable        # back to shortcut-only
+```
+
+Detection is fully local and only runs while `wake-word listen` is running (no
+daemon or autostart). The default engine reuses your local whisper.cpp model, so
+the default `дідько` — and other languages/phrases — work **without any training**;
+an optional lower-CPU openWakeWord engine is available for its supported English
+phrases. Details, licensing and accuracy caveats:
+[docs/wake-word.md](docs/wake-word.md).
 
 ## Commands
 

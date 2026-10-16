@@ -34,6 +34,7 @@ DRY_RUN=0
 ASSUME_YES=0
 NO_MODEL=0
 CHECK_ONLY=0
+WITH_WAKE_WORD=0
 
 PASS=0
 WARN=0
@@ -79,6 +80,7 @@ Options:
       --dry-run           Show what would be done without changing anything.
   -y, --yes               Assume "yes" to the supported prompts (non-interactive).
       --no-model-download Skip pulling the Ollama and Whisper models.
+      --with-wake-word    Also install the optional wake-word engine (openWakeWord).
 
 The installer reuses scripts/setup-ollama.sh, setup-whisper.sh and
 download-models.sh, never overwrites ~/.config/hyprwhispr/config.json, and never
@@ -287,6 +289,14 @@ assess_requirements() {
   have gtk-launch && ok "gtk-launch" || warn "gtk-launch missing (apps fall back to Exec parsing)"
   have ffmpeg && ok "ffmpeg (mictest levels)" || warn "ffmpeg missing (mictest level analysis unavailable)"
   have wl-copy && ok "wl-copy (clipboard)" || warn "wl-copy missing (prompt copy unavailable)"
+  # Wake word uses the local whisper engine by default (already installed); the
+  # openWakeWord engine is an optional lower-CPU alternative.
+  if compgen -G "$HOME/.local/pipx/venvs/hyprwhispr/lib/python*/site-packages/openwakeword" >/dev/null 2>&1 \
+     || { have python3 && python3 -c 'import openwakeword' >/dev/null 2>&1; }; then
+    ok "wake-word openWakeWord engine (optional, low-CPU)"
+  else
+    warn "wake word uses the whisper engine by default; optional openWakeWord: pipx inject hyprwhispr openwakeword sounddevice"
+  fi
 
   say "Application:"
   if cli_bin_path >/dev/null 2>&1; then
@@ -377,6 +387,22 @@ install_python_app() {
     warn "hyprwhispr installed to $bindir, which is not on PATH - add: export PATH=\"$bindir:\$PATH\""
   fi
 }
+
+install_wakeword_extra() {
+  [ "$WITH_WAKE_WORD" = 1 ] || return 0
+  say ""
+  say "Optional wake-word engine (openWakeWord + sounddevice, approx. 100-300 MB)."
+  say "No wake-word model is downloaded and listening is never started by the installer."
+  if have pipx && pipx list --short 2>/dev/null | grep -q '^hyprwhispr '; then
+    do_action "install the wake-word engine into the hyprwhispr venv" \
+      pipx inject hyprwhispr openwakeword sounddevice \
+      || warn "wake-word engine not installed; add it later (see docs/wake-word.md)"
+  else
+    warn "hyprwhispr is not installed with pipx; install the wake-word engine manually"
+    info "see docs/wake-word.md for the optional engine and model instructions"
+  fi
+}
+
 
 install_ollama_model() {
   local model; model="$(configured_model)"
@@ -514,6 +540,7 @@ main() {
       --dry-run) DRY_RUN=1 ;;
       -y|--yes) ASSUME_YES=1 ;;
       --no-model-download) NO_MODEL=1 ;;
+      --with-wake-word) WITH_WAKE_WORD=1 ;;
       *) printf 'error: unknown option: %s\n\n' "$1" >&2; usage >&2; return 2 ;;
     esac
     shift
@@ -567,6 +594,7 @@ main() {
   install_build_and_audio_packages
   install_optional_packages
   install_python_app
+  install_wakeword_extra
   install_ollama_model
   install_whisper
   install_speech_model
