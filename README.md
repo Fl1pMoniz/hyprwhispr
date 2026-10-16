@@ -30,25 +30,36 @@ library only, and small enough to read in an afternoon.
 ## Features
 
 - Global **hold-to-talk** binding on Hyprland (`bind` + `bindr`).
-- **Local English speech-to-text** with whisper.cpp (`small.en`), CUDA or CPU.
+- **Local English speech-to-text** with whisper.cpp (`small.en`), CUDA or CPU,
+  with a silence/short-record gate and automatic GPU→CPU fallback.
 - **Local inference** through Ollama, with a configurable model (default
   `qwen3:4b`).
-- **Answer questions** with the local model; replies are plain text.
+- **Natural-language tool calling** — varied phrasing ("can you bring up my
+  browser?", "I'm done playing, shut Steam down") maps to the right tool via
+  native function calling, with a strict JSON fallback for models without it.
+- **Conversation context** — follow-ups like "now close it" resolve against a
+  bounded, expiring local session (not a database).
+- **Ambiguity handling** — when several apps match, it asks instead of guessing,
+  and remembers the choices for the next turn.
 - **Launch and close apps and Steam games** by name, discovered from your
   installed `.desktop` files and Steam library (no hard-coded allow-list).
 - **Web search** that opens your browser (the only feature that uses the network).
 - **Notes and preferences** stored locally as plain files.
 - **Confirmation gates** for shell commands, package installs and file deletion.
-- **Audit log** of every tool call.
+- **Audit log** of tool name, status and duration (arguments and transcripts are
+  not logged by default).
 - **OpenCode integration** by launching it (optionally with a prepared prompt).
 - Microphone helpers: `list-mics`, `mictest`, and a terminal `listen` mode.
+- A repeatable **tool-selection benchmark** (`scripts/benchmark.py`).
 
 ## Architecture
 
 See [`docs/architecture.md`](docs/architecture.md). In short: a key press spawns
-`pw-record`; the key release stops it and starts a detached worker that runs
-whisper.cpp, then the Ollama agent loop (with tools), then shows the answer with
-`notify-send`.
+`pw-record`; the key release stops it, applies a silence/short-record gate, and
+starts a detached worker that runs whisper.cpp, then the Ollama **agent loop**
+(with typed tools, duplicate-call suppression, ambiguity detection and a bounded
+step budget), then shows the answer with `notify-send`. Follow-ups resolve
+against a small, expiring session file.
 
 ## Requirements
 
@@ -169,6 +180,8 @@ Your numbers will differ with model, context size and driver. To reduce usage:
 | `transcribe <wav>` / `process <wav>` | speech-to-text only / full pipeline |
 | `read` | show the last exchange |
 | `apps` / `games` / `launch` / `play` / `close` | application and game control |
+| `resolve <query>` | show which apps/games match a query (debug) |
+| `session` / `session clear` | show or clear the conversation context |
 | `refresh-apps` | rebuild the app and Steam indexes |
 | `list-mics` / `mictest` | microphone helpers |
 | `model [small\|large\|name]` | show or set the model |
@@ -190,9 +203,24 @@ pip install -e . pytest
 pytest -q
 ```
 
-The suite runs against an isolated temporary data directory and uses mocks, so it
-never touches your real desktop. `scripts/verify.sh` checks the local runtime
-dependencies.
+The suite runs against an isolated temporary data directory and uses mocks and a
+scripted fake model, so it never touches your real desktop, microphone or GPU.
+`scripts/verify.sh` checks the local runtime dependencies.
+
+### Benchmark
+
+`scripts/benchmark.py` measures tool selection over a fixed set of requests
+(`tests/eval/requests.json`). It runs offline by default (harness check) and
+against the real local model with `--live`; in both cases tools are recorded,
+never executed:
+
+```bash
+python scripts/benchmark.py         # harness, no model
+python scripts/benchmark.py --live  # real local model
+```
+
+It reports tool-selection accuracy, argument accuracy, clarification rate,
+unsafe-action rate, LLM calls per task, and latency (median / p95).
 
 ## Troubleshooting
 
@@ -216,4 +244,10 @@ small, tested and honest.
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Third-party components and model licences are
-listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), with the evidence,
+uncertainties and provenance caveats recorded in
+[`docs/license-audit.md`](docs/license-audit.md). Run `scripts/audit.sh` for a
+lightweight hygiene/dependency check (it cannot prove provenance or compliance).
+
+Note: the source was authored with AI assistance; see the provenance section of
+`THIRD_PARTY_NOTICES.md`.

@@ -30,9 +30,13 @@ def tool_run_shell(cfg: dict, command: str) -> str:
         return "user denied the shell command"
     log_event({"event": "tool_approved", "tool": "run_shell", "command": command})
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
+        # shell=True is deliberate and unique to this tool: the user explicitly
+        # approved an arbitrary command (pipes, redirection). Every other tool
+        # uses an argument vector instead of a shell string.
+        result = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                timeout=int(cfg.get("tool_timeout", 60)))
     except subprocess.TimeoutExpired:
-        return "command timed out after 60s"
+        return "command timed out"
     output = (result.stdout + result.stderr).strip()[:2000]
     return f"exit {result.returncode}: {output or '(no output)'}"
 

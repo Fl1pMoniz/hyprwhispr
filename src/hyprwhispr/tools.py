@@ -95,8 +95,12 @@ TOOLS_SCHEMA = [
                        "required": ["key", "value"]}}},
     {"type": "function", "function": {
         "name": "recall",
-        "description": "Look up a previously remembered preference or fact.",
-        "parameters": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}}},
+        "description": (
+            "Look up what the user previously asked you to remember. For 'what did I "
+            "ask you to remember' or 'what do you know about me', call it with no key "
+            "to list everything. Provide a key only when looking up one specific fact."
+        ),
+        "parameters": {"type": "object", "properties": {"key": {"type": "string"}}, "required": []}}},
     {"type": "function", "function": {
         "name": "run_shell",
         "description": "DESTRUCTIVE: run an arbitrary shell command. Always requires explicit user confirmation.",
@@ -114,13 +118,39 @@ TOOLS_SCHEMA = [
 
 def dispatch_tool(cfg: dict, name: str, arguments: dict) -> str:
     """Run the named tool with only its declared parameters; never raise."""
+    import time
+
     entry = TOOL_IMPL.get(name)
     if not entry:
+        log_event({"event": "tool_call", "tool": name, "status": "unknown_tool"})
         return f"error: unknown tool '{name}'"
+    if not isinstance(arguments, dict):
+        log_event({"event": "tool_call", "tool": name, "status": "bad_arguments"})
+        return f"error: arguments for '{name}' must be a JSON object"
+
     func, parameters = entry
     kwargs = {param: arguments.get(param, "") for param in parameters}
-    log_event({"event": "tool_call", "tool": name, "args": kwargs})
+    record = {"event": "tool_call", "tool": name}
+    if cfg.get("log_tool_args"):
+        record["args"] = kwargs
+    start = time.perf_counter()
     try:
-        return func(cfg, **kwargs)
+        result = func(cfg, **kwargs)
     except Exception as exc:  # noqa: BLE001 - a tool must never crash the turn
+        record.update(status="exception", error=type(exc).__name__, ms=round((time.perf_counter() - start) * 1000))
+        log_event(record)
         return f"error running {name}: {exc}"
+    record["ms"] = round((time.perf_counter() - start) * 1000)
+    record["status"] = _classify(result)
+    log_event(record)
+    return result
+
+
+def _classify(result: str) -> str:
+    if isinstance(result, str) and result.startswith("error"):
+        return "error"
+    if isinstance(result, str) and "ambiguous" in result[:20]:
+        return "ambiguous"
+    if isinstance(result, str) and ("denied" in result):
+        return "denied"
+    return "ok"

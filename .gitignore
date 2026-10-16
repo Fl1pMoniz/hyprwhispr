@@ -8,10 +8,13 @@ config.json
 *.wav
 *.bin
 *.gguf
+*.part
+*.safetensors
 models/
 cache/
 logs/
 notes/
+state/
 record.pid
 
 # --- python ---

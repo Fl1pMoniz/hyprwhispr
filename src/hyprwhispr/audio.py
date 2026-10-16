@@ -11,6 +11,8 @@ Nothing listens to the microphone except between those two calls.
 
 from __future__ import annotations
 
+import array
+import math
 import os
 import pathlib
 import shutil
@@ -18,9 +20,40 @@ import signal
 import subprocess
 import sys
 import time
+import wave
 
 from . import config
 from .notify import log_event, notify
+
+
+def probe_wav(path: pathlib.Path) -> tuple[int, float]:
+    """Return ``(duration_ms, peak_dbfs)`` for a 16-bit PCM WAV file.
+
+    Returns ``(0, -inf)`` when the file cannot be read. This is used to reject
+    accidental taps and silent recordings before spending time on whisper.
+    """
+    try:
+        with wave.open(str(path), "rb") as wav:
+            frames = wav.getnframes()
+            rate = wav.getframerate()
+            width = wav.getsampwidth()
+            raw = wav.readframes(frames)
+    except (wave.Error, OSError):
+        return 0, float("-inf")
+    if rate <= 0:
+        return 0, float("-inf")
+    duration_ms = int(1000 * frames / rate)
+    if width != 2:
+        return duration_ms, float("-inf")
+    try:
+        samples = array.array("h")
+        samples.frombytes(raw)
+    except ValueError:
+        return duration_ms, float("-inf")
+    peak = max((abs(sample) for sample in samples), default=0)
+    if peak <= 0:
+        return duration_ms, float("-inf")
+    return duration_ms, 20 * math.log10(peak / 32768.0)
 
 
 def _recorder_command(cfg: dict, output: pathlib.Path) -> list[str]:
@@ -89,6 +122,17 @@ def record_stop(cfg: dict) -> int:
 
     if not config.WAVFILE.exists() or config.WAVFILE.stat().st_size < 2000:
         notify("Nothing recorded", "The clip was too short - hold the key while you speak.")
+        return 0
+
+    duration_ms, peak_db = probe_wav(config.WAVFILE)
+    min_ms = int(cfg.get("min_record_ms", 300))
+    if duration_ms and duration_ms < min_ms:
+        log_event({"event": "record_rejected", "reason": "too_short", "ms": duration_ms})
+        notify("Too short", f"Hold the key a little longer than {min_ms} ms.")
+        return 0
+    if peak_db < float(cfg.get("silence_threshold_db", -50)):
+        log_event({"event": "record_rejected", "reason": "silence", "peak_db": round(peak_db, 1)})
+        notify("No speech detected", "I only heard silence - check your microphone.")
         return 0
 
     subprocess.Popen(

@@ -1,0 +1,20 @@
+[
+  {"text": "Open Firefox.", "expect_tools": ["open_app"], "expect_arg": "firefox"},
+  {"text": "Can you bring up my browser?", "expect_tools": ["open_app"], "expect_arg": "browser"},
+  {"text": "I need to get on the internet.", "expect_tools": ["open_app"]},
+  {"text": "Launch the browser for me.", "expect_tools": ["open_app"], "expect_arg": "browser"},
+  {"text": "Start Firefox, please.", "expect_tools": ["open_app"], "expect_arg": "firefox"},
+  {"text": "Close Steam.", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "I'm done playing; shut Steam down.", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "Can you get rid of the Steam window?", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "Start my game, Hollow Knight.", "expect_tools": ["open_app", "launch_steam_game"], "expect_arg": "hollow"},
+  {"text": "What applications do I have installed?", "expect_tools": ["list_apps"]},
+  {"text": "Remember that I prefer smaller language models.", "expect_tools": ["remember"], "expect_arg": "smaller"},
+  {"text": "What did I ask you to remember?", "expect_tools": ["recall"]},
+  {"text": "How much VRAM might you be using?", "expect": "answer"},
+  {"text": "Search the web for the latest Fedora release.", "expect_tools": ["web_search"], "expect_arg": "fedora"},
+  {"text": "How do I close Steam?", "expect": "answer"},
+  {"text": "Don't open Steam.", "expect": "answer"},
+  {"text": "Open the editor.", "expect_tools": ["open_app"]},
+  {"text": "Delete the old files.", "expect": "clarify"}
+]

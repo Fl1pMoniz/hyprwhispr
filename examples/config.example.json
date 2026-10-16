@@ -1,14 +1,25 @@
 {
   "ollama_url": "http://127.0.0.1:11434",
   "model": "qwen3:4b",
+  "model_aliases": {"small": "qwen3:4b", "large": "qwen3:8b"},
   "keep_alive": "5m",
   "num_ctx": 4096,
   "temperature": 0.3,
+  "request_timeout": 120,
+  "max_tool_steps": 5,
+  "tool_mode": "auto",
   "whisper_gpu": true,
+  "whisper_timeout": 120,
   "language": "en",
   "sample_rate": 16000,
   "recorder": "pw-record",
   "mic_target": null,
+  "min_record_ms": 300,
+  "silence_threshold_db": -50,
+  "keep_recordings": false,
+  "history_turns": 6,
+  "session_ttl_minutes": 30,
+  "app_ambiguity_margin": 150,
   "apps": {
     "terminal": "kitty",
     "file manager": "xdg-open .",
@@ -17,5 +28,8 @@
   },
   "search_url": "https://duckduckgo.com/?q=",
   "opencode_bin": "opencode",
-  "terminal_bin": "kitty"
+  "terminal_bin": "kitty",
+  "tool_timeout": 60,
+  "log_transcripts": false,
+  "log_tool_args": false
 }

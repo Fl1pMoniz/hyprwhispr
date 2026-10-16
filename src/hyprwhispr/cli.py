@@ -2,17 +2,19 @@
 
 The same executable serves the compositor (``record-start`` / ``record-stop``),
 interactive testing (``ask``, ``transcribe``, ``listen``) and management
-(``apps``, ``games``, ``model``, ``refresh-apps``).
+(``apps``, ``games``, ``model``, ``session``, ``refresh-apps``).
 """
 
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-from . import apps, audio, config, speech
+from . import apps, audio, config, session, speech
 from .llm import run_pipeline
 from .notify import log_event, notify
 
@@ -38,7 +40,12 @@ Applications and games:
   launch <app>              open an app or game by name
   play <game>               launch a Steam game by name
   close <name>              close an app or game by name
+  resolve <query>           show which apps/games match a query (debug)
   refresh-apps              rebuild the app and Steam indexes
+
+Conversation:
+  session                   show the current conversation context
+  session clear             forget the conversation context
 
 Setup:
   list-mics                 show audio input devices
@@ -52,11 +59,35 @@ def show_answer(cfg: dict, transcript: str, answer: str) -> None:
     config.ensure_dirs()
     config.LAST_TRANSCRIPT.write_text(transcript or "")
     config.LAST_ANSWER.write_text(answer or "")
-    with (config.LOGS_DIR / "exchanges.log").open("a") as fh:
-        fh.write(f"\n[{config.now()}]\nUSER: {transcript}\nASSISTANT: {answer}\n")
+    if cfg.get("log_transcripts"):
+        with (config.LOGS_DIR / "exchanges.log").open("a") as fh:
+            fh.write(f"\n[{config.now()}]\nUSER: {transcript}\nASSISTANT: {answer}\n")
     if transcript:
         notify("You said", transcript, timeout=5000)
     notify("Assistant", answer or "(no answer)")
+
+
+def _cleanup_recording(cfg: dict, wav_path: str) -> None:
+    """Remove the recording unless the user asked to keep them.
+
+    Only files inside the runtime directory are ever deleted, so passing an
+    unrelated path to ``process`` can never remove user data.
+    """
+    if cfg.get("keep_recordings"):
+        return
+    target = Path(wav_path).resolve()
+    try:
+        target.relative_to(config.RUNTIME_DIR.resolve())
+    except ValueError:
+        return
+    target.unlink(missing_ok=True)
+
+
+def _run_turn(cfg: dict, text: str) -> str:
+    state = session.load(cfg)
+    answer = run_pipeline(cfg, text, state=state)
+    session.save(cfg, state)
+    return answer
 
 
 def handle_wav(cfg: dict, wav_path: str) -> int:
@@ -65,17 +96,21 @@ def handle_wav(cfg: dict, wav_path: str) -> int:
     if error:
         notify("Transcription failed", error, "critical")
         log_event({"event": "transcribe_error", "error": error})
+        _cleanup_recording(cfg, wav_path)
         return 1
     if not text:
         notify("Nothing recognised", "I didn't catch any speech.")
+        _cleanup_recording(cfg, wav_path)
         return 0
     try:
-        answer = run_pipeline(cfg, text)
+        answer = _run_turn(cfg, text)
     except Exception as exc:  # noqa: BLE001
         notify("Assistant error", f"Local model call failed: {exc}", "critical")
         log_event({"event": "llm_error", "error": str(exc)})
+        _cleanup_recording(cfg, wav_path)
         return 1
     show_answer(cfg, text, answer)
+    _cleanup_recording(cfg, wav_path)
     return 0
 
 
@@ -96,7 +131,7 @@ def listen(cfg: dict, seconds: int = 6) -> int:
     if not text:
         return 0
     try:
-        answer = run_pipeline(cfg, text)
+        answer = _run_turn(cfg, text)
     except Exception as exc:  # noqa: BLE001
         print("model error:", exc)
         return 1
@@ -150,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     if command == "ask" and rest:
         text = " ".join(rest)
         try:
-            answer = run_pipeline(cfg, text)
+            answer = _run_turn(cfg, text)
         except Exception as exc:  # noqa: BLE001
             print(f"ERROR: {exc}")
             return 1
@@ -181,15 +216,27 @@ def main(argv: list[str] | None = None) -> int:
     if command == "close" and rest:
         print(apps.tool_close_app(cfg, " ".join(rest)))
         return 0
+    if command == "resolve" and rest:
+        print(apps.tool_resolve(cfg, " ".join(rest)))
+        return 0
     if command == "refresh-apps":
         index = apps.build_app_index(cfg)
         games = apps.build_steam_games(cfg)
         print(f"indexed {len(index['apps'])} apps and {len(games['games'])} Steam games")
         return 0
 
+    if command == "session":
+        if rest and rest[0] == "clear":
+            session.clear(cfg)
+            print("conversation context cleared")
+        else:
+            print(json.dumps(session.load(cfg), indent=2, ensure_ascii=False))
+        return 0
+
     if command == "model":
         if rest:
-            chosen = {"small": "qwen3:4b", "large": "qwen3:8b"}.get(rest[0], rest[0])
+            aliases = cfg.get("model_aliases", {"small": "qwen3:4b", "large": "qwen3:8b"})
+            chosen = aliases.get(rest[0], rest[0])
             cfg["model"] = chosen
             config.save_config(cfg)
             print(f"model set to {chosen}")

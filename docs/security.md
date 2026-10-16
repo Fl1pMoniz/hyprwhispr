@@ -16,8 +16,15 @@ predictable and local-first.
 - **High-impact actions always confirm.** `run_shell`, `install_package` and
   `delete_path` call `permissions.confirm`, which fails closed (denied if no
   dialog or no answer within 60 s).
+- **Ambiguity is never guessed.** When a target could be several apps/games the
+  assistant asks instead of acting; destructive tools are never invoked on a
+  guess.
 - **Notes and web results are data, not instructions.** Saved notes are only read
-  back as text; the assistant does not fetch or execute web content at all.
+  back as text; the assistant does not fetch or execute web content at all, and a
+  tool result can never change permissions.
+- **`shell=True` is used only by `run_shell`.** Every other subprocess uses an
+  argument vector. `run_shell` is unique because the user explicitly approved an
+  arbitrary command (pipes, redirection).
 
 ## Local by default
 
@@ -37,11 +44,14 @@ predictable and local-first.
 - Nothing here escalates privileges. `install_package` opens a terminal so *you*
   type your own password; hyprwhispr never handles credentials.
 
-## Audit log
+## Audit log and privacy defaults
 
 Every tool call, approval and denial is appended to
-`<data>/logs/audit.jsonl` with a timestamp. Arguments are logged as given;
-no secrets are collected by the assistant.
+`<data>/logs/audit.jsonl` with a timestamp, tool name, status and duration.
+Tool **arguments are not logged by default** (`log_tool_args`), and transcript
+text is **not written** to `exchanges.log` by default (`log_transcripts`). The
+short-lived conversation context in `<data>/state/session.json` is bounded,
+expires, and is created with owner-only permissions. Nothing is sent anywhere.
 
 ## Reporting a vulnerability
 

@@ -67,9 +67,17 @@ def tool_remember(cfg: dict, key: str, value: str) -> str:
     return f"remembered '{key}'"
 
 
-def tool_recall(cfg: dict, key: str) -> str:
+def tool_recall(cfg: dict, key: str = "") -> str:
     prefs = load_preferences()
-    value = prefs.get((key or "").strip().lower())
-    if value is None:
-        return f"nothing remembered for '{key}'"
-    return f"{key}: {value}"
+    wanted = (key or "").strip().lower()
+    if not wanted:  # no key: list everything remembered
+        if not prefs:
+            return "nothing is remembered yet"
+        return "remembered: " + "; ".join(f"{k}: {v}" for k, v in prefs.items())
+    value = prefs.get(wanted)
+    if value is not None:
+        return f"{key}: {value}"
+    matches = {k: v for k, v in prefs.items() if wanted in k}
+    if matches:
+        return "remembered: " + "; ".join(f"{k}: {v}" for k, v in matches.items())
+    return f"nothing remembered for '{key}'"

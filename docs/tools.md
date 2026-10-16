@@ -2,7 +2,8 @@
 
 The model chooses tools from JSON schemas; it never emits shell text that
 hyprwhispr executes. Argument types and lengths are validated in
-`validation.py`. Every call is written to `logs/audit.jsonl`.
+`validation.py`. Every call is written to `logs/audit.jsonl` (tool name, status
+and duration; arguments only when `log_tool_args` is enabled).
 
 ## Safe tools (run automatically)
 
@@ -18,7 +19,7 @@ hyprwhispr executes. Argument types and lengths are validated in
 | `save_note` | `text` | append to the local notes file |
 | `list_notes` | `query?` | search local notes |
 | `remember` | `key`, `value` | persist a preference |
-| `recall` | `key` | read a persisted preference |
+| `recall` | `key?` | read a preference; with no key, list everything remembered |
 
 ## Confirmation-gated tools (always ask first)
 
@@ -32,19 +33,42 @@ The confirmation dialog is `zenity` (or `rofi`). It **fails closed**: if no
 dialog is available, or the user does not answer within 60 seconds, the action
 is denied and recorded as denied.
 
+## How the model chooses tools
+
+Tool selection is model-driven (native Ollama function calling, with a strict
+JSON fallback for servers without tool support). There is no keyword matching:
+the assistant understands phrasing like "can you bring up my browser?" or "I'm
+done playing, shut Steam down" because the model maps them to `open_app` /
+`close_app`. Configured `apps` aliases (for example `browser`, `terminal`,
+`editor`) are listed to the model so indirect references resolve.
+
 ## Application and Steam discovery
 
 `open_app` first checks the `apps` map in your config (handy aliases), then an
-index of every installed `.desktop` file, then the Steam library. The Steam index
-is built from `appmanifest_*.acf` files across all library folders plus Steam's
-own shortcuts. `list_apps` / `list_steam_games` show what is available. Run
-`hyprwhispr refresh-apps` after installing new software; the index also refreshes
-automatically after 24 hours.
+index of every installed `.desktop` file, then the Steam library. Names are
+normalized (case, Unicode, punctuation) and filtered of filler words, so "my
+web browser" and "Firefox!" both resolve. The Steam index is built from
+`appmanifest_*.acf` files across all library folders plus Steam's own
+shortcuts. Run `hyprwhispr refresh-apps` after installing new software; the
+index also refreshes automatically after 24 hours. Use `hyprwhispr resolve
+<query>` to see which candidates matched and their scores.
 
 Launching uses `gtk-launch` (which honours flatpak apps and `Terminal=true`).
 Closing focuses the matching window and asks the compositor to close it
 (`hl.dsp.window.close()`), falling back to a graceful `SIGTERM` for windows that
 ignore the request.
+
+## Ambiguity and context
+
+If a query matches several apps or games with no clear winner, `open_app` /
+`close_app` do **not** guess: they return an `ambiguous:` result listing the
+candidates. The assistant then asks the user a short question, and the choices
+are remembered in the session so the next utterance ("KCalc") resolves.
+
+References like "it", "that app" or "the previous one" are resolved from the
+session context: the most recently referenced target is provided to the model
+each turn. The context is bounded and expires (see `docs/configuration.md`), and
+is separate from persistent notes/preferences.
 
 ## What can touch the network
 

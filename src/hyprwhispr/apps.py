@@ -21,11 +21,16 @@ import shutil
 import signal
 import subprocess
 import time
+import unicodedata
 
 from . import config
 from .notify import log_event, notify
 from .permissions import confirm
 from .validation import args_ok, non_empty
+
+#: A match at or above this score (exact name, name prefix, exact desktop id) is
+#: trusted without asking; weaker matches must be unambiguous or we ask.
+CONFIDENT_SCORE = 600
 
 _HOME = pathlib.Path.home()
 
@@ -126,10 +131,11 @@ def load_app_index(cfg: dict, max_age_hours: int = 24) -> dict:
 
 
 def _score_app(entry: dict, query: str, tokens: list[str]) -> int:
-    name = entry["name"].lower()
-    generic = entry.get("generic", "").lower()
-    keywords = " ".join(entry.get("keywords", [])).lower()
-    entry_id = entry["id"].lower()
+    name = normalize(entry.get("name"))
+    generic = normalize(entry.get("generic"))
+    keywords = normalize(" ".join(entry.get("keywords", [])))
+    entry_id = normalize(entry.get("id"))
+    haystack = f"{name} {generic} {keywords} {entry_id}"
     score = 0
     if name == query:
         score = 1000
@@ -147,29 +153,85 @@ def _score_app(entry: dict, query: str, tokens: list[str]) -> int:
         score = max(score, 250)
     if query in keywords:
         score = max(score, 150)
-    if tokens and all(t in f"{name} {generic} {keywords} {entry_id}" for t in tokens):
+    if tokens and all(t in haystack for t in tokens):
         score = max(score, 300)
     if score:
         score -= len(name) // 50  # prefer shorter names on near-ties
     return score
 
 
+def resolve_app_candidates(index: dict, query: str, limit: int = 6) -> list[tuple[int, dict]]:
+    """Return the best ``(score, entry)`` matches, highest first."""
+    cleaned, tokens = _clean_query(query)
+    if not cleaned:
+        return []
+    scored = [(_score_app(entry, cleaned, tokens), entry) for entry in index.get("apps", [])]
+    scored = [(score, entry) for score, entry in scored if score > 0]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return scored[:limit]
+
+
 def resolve_app(index: dict, query: str) -> dict | None:
-    q = (query or "").strip().lower()
-    if not q:
-        return None
-    tokens = [t for t in re.split(r"\W+", q) if t]
-    best, best_score = None, 0
-    for entry in index.get("apps", []):
-        score = _score_app(entry, q, tokens)
-        if score > best_score:
-            best, best_score = entry, score
-    return best if best_score > 0 else None
+    candidates = resolve_app_candidates(index, query, limit=1)
+    return candidates[0][1] if candidates else None
+
+
+def _is_confident(top_score: int, candidates: list[tuple[int, dict]], cfg: dict) -> bool:
+    """True when the top match is safe to act on without asking."""
+    if top_score >= CONFIDENT_SCORE:
+        return True
+    if len(candidates) == 1:
+        return True
+    margin = int(cfg.get("app_ambiguity_margin", 150))
+    return top_score >= 400 and (top_score - candidates[1][0]) >= margin
+
+
+def format_candidates(candidates: list[tuple[int, dict]]) -> str:
+    return ", ".join(entry.get("name", "?") for _, entry in candidates)
 
 
 def _exec_argv(exec_line: str) -> list[str]:
     argv = [a for a in shlex.split(exec_line) if not re.fullmatch(r"%[fFuUdDnNickvm]", a)]
     return [a.replace("%%", "%") for a in argv]
+
+
+def normalize(text: str | None) -> str:
+    """Casefold, NFKC-normalise and reduce punctuation/spacing so that
+    "Firefox!", "FIREFOX" and "firefox" compare equally."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text).casefold()
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    text = re.sub(r"[_]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+#: Words that carry no target information; dropped before matching so that
+#: "my browser", "the editor" and "please open Firefox" resolve cleanly.
+STOPWORDS = {
+    "my", "the", "a", "an", "this", "that", "these", "those", "please",
+    "app", "application", "program", "game", "to", "for", "me", "you", "up",
+    "on", "of", "open", "launch", "start", "close", "quit", "play", "bring",
+    "get", "run", "can", "could", "would",
+}
+
+
+def _clean_query(query: str) -> tuple[str, list[str]]:
+    normalized = normalize(query)
+    tokens = [t for t in normalized.split() if t not in STOPWORDS and len(t) >= 2]
+    return (" ".join(tokens) if tokens else normalized), tokens
+
+
+def _match_configured(configured: dict[str, str], query: str) -> str | None:
+    """Return a configured launcher whose key matches the query (exact or token)."""
+    normalized = normalize(query)
+    if normalized in configured:
+        return configured[normalized]
+    query_tokens = set(normalized.split())
+    for key, command in configured.items():
+        if key and (key in query_tokens or any(tok in key.split() for tok in query_tokens)):
+            return command
+    return None
 
 
 def launch_desktop(cfg: dict, entry: dict) -> None:
@@ -254,19 +316,36 @@ def load_steam_games(cfg: dict, max_age_hours: int = 24) -> dict:
     return build_steam_games(cfg)
 
 
+def _score_game(game: dict, query: str) -> int:
+    name = normalize(game.get("name"))
+    if not name:
+        return 0
+    if name == query:
+        score = 1000
+    elif name.startswith(query):
+        score = 600
+    elif query in name:
+        score = 400
+    else:
+        score = 0
+    if score:
+        score -= len(name) // 50
+    return score
+
+
+def resolve_game_candidates(index: dict, query: str, limit: int = 6) -> list[tuple[int, dict]]:
+    cleaned, _ = _clean_query(query)
+    if not cleaned:
+        return []
+    scored = [(_score_game(game, cleaned), game) for game in index.get("games", [])]
+    scored = [(score, game) for score, game in scored if score > 0]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return scored[:limit]
+
+
 def resolve_game(index: dict, query: str) -> dict | None:
-    q = (query or "").strip().lower()
-    if not q:
-        return None
-    best, best_score = None, 0
-    for game in index.get("games", []):
-        name = game["name"].lower()
-        score = 1000 if name == q else 600 if name.startswith(q) else 400 if q in name else 0
-        if score:
-            score -= len(name) // 50
-            if score > best_score:
-                best, best_score = game, score
-    return best if best_score > 0 else None
+    candidates = resolve_game_candidates(index, query, limit=1)
+    return candidates[0][1] if candidates else None
 
 
 def launch_steam_game(cfg: dict, game: dict) -> None:
@@ -292,11 +371,11 @@ def _list_windows() -> list[dict]:
 def _name_tokens(*names: str) -> set[str]:
     tokens: set[str] = set()
     for name in names:
-        if not name:
+        normalized = normalize(name)
+        if not normalized:
             continue
-        name = name.lower()
-        tokens.add(name)
-        tokens.update(t for t in re.split(r"\W+", name) if len(t) >= 4)
+        tokens.add(normalized)
+        tokens.update(t for t in normalized.split() if len(t) >= 4)
     return tokens
 
 
@@ -319,26 +398,53 @@ def _windows_matching(tokens: set[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+AMBIGUOUS_PREFIX = "ambiguous: "
+
+
+def parse_ambiguous(result: str) -> list[str]:
+    """Extract the candidate names from an ``ambiguous:`` tool result."""
+    if not result.startswith(AMBIGUOUS_PREFIX):
+        return []
+    match = re.search(r"\[([^\]]*)\]", result)
+    if not match:
+        return []
+    return [name.strip() for name in match.group(1).split(",") if name.strip()]
+
+
+def _ambiguous_result(kind: str, query: str, candidates: list[tuple[int, dict]]) -> str:
+    names = format_candidates(candidates)
+    return (f"{AMBIGUOUS_PREFIX}[{names}] several {kind} match '{query}'. "
+            "Ask the user which one they mean before acting.")
+
+
 def tool_open_app(cfg: dict, app: str) -> str:
     if not non_empty(app, 120):
         return "error: no application name was provided; ask the user which app to open"
-    key = app.strip().lower()
-    configured = {k.lower(): v for k, v in cfg["apps"].items()}
-    if key in configured:
-        cmd = shlex.split(configured[key])
+    configured = {normalize(k): v for k, v in cfg["apps"].items()}
+    command = _match_configured(configured, app)
+    if command:
+        cmd = shlex.split(command)
         if not shutil.which(cmd[0]):
             return f"error: launcher '{cmd[0]}' not found"
         subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
         return f"opened {app}"
-    hit = resolve_app(load_app_index(cfg), app)
-    if hit:
-        launch_desktop(cfg, hit)
-        return f"opened {hit['name']}"
-    game = resolve_game(load_steam_games(cfg), app)
-    if game:
-        launch_steam_game(cfg, game)
-        return f"launched the Steam game {game['name']}"
+
+    app_candidates = resolve_app_candidates(load_app_index(cfg), app)
+    game_candidates = resolve_game_candidates(load_steam_games(cfg), app)
+    best_app = app_candidates[0] if app_candidates else None
+    best_game = game_candidates[0] if game_candidates else None
+
+    if best_app and (best_game is None or best_app[0] >= best_game[0]):
+        if _is_confident(best_app[0], app_candidates, cfg):
+            launch_desktop(cfg, best_app[1])
+            return f"opened {best_app[1]['name']}"
+        return _ambiguous_result("applications", app, app_candidates)
+    if best_game:
+        if _is_confident(best_game[0], game_candidates, cfg):
+            launch_steam_game(cfg, best_game[1])
+            return f"launched the Steam game {best_game[1]['name']}"
+        return _ambiguous_result("Steam games", app, game_candidates)
     return f"error: no installed app or Steam game matches '{app}'"
 
 
@@ -366,22 +472,48 @@ def tool_list_steam_games(cfg: dict, query: str = "") -> str:
 
 
 def tool_launch_steam_game(cfg: dict, game: str) -> str:
-    if not args_ok(game, 200):
+    if not non_empty(game, 200):
         return "error: invalid game name"
-    hit = resolve_game(load_steam_games(cfg), game)
-    if not hit:
+    candidates = resolve_game_candidates(load_steam_games(cfg), game)
+    if not candidates:
         return f"error: no installed Steam game matches '{game}'"
-    launch_steam_game(cfg, hit)
-    return f"launching the Steam game {hit['name']}"
+    if not _is_confident(candidates[0][0], candidates, cfg):
+        return _ambiguous_result("Steam games", game, candidates)
+    launch_steam_game(cfg, candidates[0][1])
+    return f"launching the Steam game {candidates[0][1]['name']}"
+
+
+def _resolve_target(cfg: dict, name: str) -> tuple[dict | None, dict | None, str | None]:
+    """Resolve a name to at most one app and one game, or explain the ambiguity.
+
+    Returns ``(app_entry, game_entry, error)``. When ``error`` is set the caller
+    must surface it and take no action.
+    """
+    app_candidates = resolve_app_candidates(load_app_index(cfg), name)
+    game_candidates = resolve_game_candidates(load_steam_games(cfg), name)
+    best_app = app_candidates[0] if app_candidates else None
+    best_game = game_candidates[0] if game_candidates else None
+
+    if best_app and (best_game is None or best_app[0] >= best_game[0]):
+        if _is_confident(best_app[0], app_candidates, cfg):
+            return best_app[1], None, None
+        return None, None, _ambiguous_result("applications", name, app_candidates)
+    if best_game:
+        if _is_confident(best_game[0], game_candidates, cfg):
+            return None, best_game[1], None
+        return None, None, _ambiguous_result("Steam games", name, game_candidates)
+    return None, None, None
 
 
 def tool_close_app(cfg: dict, app: str) -> str:
     """Close windows (and, if needed, terminate processes) for an app or game."""
     if not non_empty(app, 120):
         return "error: no application name was provided; ask the user which app to close"
+    app_entry, game_entry, ambiguity = _resolve_target(cfg, app)
+    if ambiguity:
+        return ambiguity
+
     tokens = _name_tokens(app)
-    app_entry = resolve_app(load_app_index(cfg), app)
-    game_entry = resolve_game(load_steam_games(cfg), app)
     if app_entry:
         tokens |= _name_tokens(app_entry["name"], app_entry["id"])
     if game_entry:
@@ -420,6 +552,22 @@ def tool_close_app(cfg: dict, app: str) -> str:
             log_event({"event": "close_process", "target": app, "program": program})
             return f"sent SIGTERM to {program}"
     return f"error: nothing open matches '{app}'"
+
+
+def tool_resolve(cfg: dict, query: str) -> str:
+    """Debug helper: show what the resolver finds for a query (no action taken)."""
+    if not non_empty(query, 200):
+        return "error: no query provided"
+    app_candidates = resolve_app_candidates(load_app_index(cfg), query, limit=8)
+    game_candidates = resolve_game_candidates(load_steam_games(cfg), query, limit=8)
+    lines = [f"resolve '{query}':"]
+    if not app_candidates and not game_candidates:
+        lines.append("  no matches")
+    for score, entry in app_candidates:
+        lines.append(f"  app  [{score}] {entry['name']}  (id: {entry['id']})")
+    for score, game in game_candidates:
+        lines.append(f"  game [{score}] {game['name']}  (appid: {game['appid']})")
+    return "\n".join(lines)
 
 
 def tool_launch_opencode(cfg: dict, prompt: str = "") -> str:

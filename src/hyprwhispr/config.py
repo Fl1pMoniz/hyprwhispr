@@ -23,7 +23,7 @@ import os
 import pathlib
 
 APP_NAME = "hyprwhispr"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 HOME = pathlib.Path.home()
 
@@ -54,6 +54,7 @@ RUNTIME_DIR = (
 NOTES_DIR = DATA_DIR / "notes"
 LOGS_DIR = DATA_DIR / "logs"
 CACHE_DIR = DATA_DIR / "cache"
+STATE_DIR = DATA_DIR / "state"
 
 PIDFILE = RUNTIME_DIR / "record.pid"
 WAVFILE = RUNTIME_DIR / "rec.wav"
@@ -67,15 +68,27 @@ DEFAULTS = {
     "keep_alive": "5m",
     "num_ctx": 4096,
     "temperature": 0.3,
+    "request_timeout": 120,        # seconds per model request
+    "max_tool_steps": 5,           # agent loop iterations before forcing an answer
+    "tool_mode": "auto",           # "auto" | "native" | "json" (see docs/architecture.md)
+    "model_aliases": {"small": "qwen3:4b", "large": "qwen3:8b"},
     # --- speech to text (whisper.cpp, local only) ---
     "whisper_bin": str(DATA_DIR / "whisper.cpp/build/bin/whisper-cli"),
     "whisper_model": str(DATA_DIR / "models/ggml-small.en.bin"),
     "whisper_gpu": True,
+    "whisper_timeout": 120,        # seconds before a transcription is aborted
     "language": "en",
     # --- audio capture ---
     "sample_rate": 16000,
     "recorder": "pw-record",
     "mic_target": None,
+    "min_record_ms": 300,          # ignore shorter holds (accidental taps)
+    "silence_threshold_db": -50,   # peak level below this is treated as silence
+    "keep_recordings": False,      # keep the recorded wav after processing
+    # --- conversation context ---
+    "history_turns": 6,            # user+assistant turns kept for the model
+    "session_ttl_minutes": 30,     # context is forgotten after this idle time
+    "app_ambiguity_margin": 150,   # score gap below which app matches are ambiguous
     # --- integrations ---
     "apps": {
         "terminal": "kitty",
@@ -86,12 +99,16 @@ DEFAULTS = {
     "search_url": "https://duckduckgo.com/?q=",
     "opencode_bin": "opencode",
     "terminal_bin": "kitty",
+    "tool_timeout": 60,            # seconds for a confirmed shell command
+    # --- logging privacy ---
+    "log_transcripts": False,      # do not write transcript text to exchanges.log by default
+    "log_tool_args": False,        # do not write tool arguments to the audit log by default
 }
 
 
 def ensure_dirs() -> None:
     """Create the data/runtime directories if they do not exist yet."""
-    for directory in (NOTES_DIR, LOGS_DIR, CACHE_DIR, RUNTIME_DIR):
+    for directory in (NOTES_DIR, LOGS_DIR, CACHE_DIR, STATE_DIR, RUNTIME_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 

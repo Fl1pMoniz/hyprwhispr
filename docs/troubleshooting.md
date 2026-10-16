@@ -15,6 +15,29 @@ Run `scripts/verify.sh` first; it reports what is missing.
   (`wpctl set-volume <id> 1.0`, `wpctl set-default <id>`).
 - The default source may be a webcam mic that is silent.
 
+## "No speech detected" or "Too short"
+hyprwhispr rejects clips that are shorter than `min_record_ms` (default 300 ms)
+or quieter than `silence_threshold_db` (default −50 dBFS) *before* running
+whisper, which removes the silence-hallucination problem. If a genuine short
+command ("stop") is being rejected, lower `min_record_ms`; if you speak quietly,
+lower `silence_threshold_db` (for example to −55).
+
+## The assistant asks which app I mean
+That is the ambiguity guard: more than one installed app matched with no clear
+winner, so it asked instead of guessing. Answer with the name (e.g. "KCalc"), and
+it will act. Use `hyprwhispr resolve "<name>"` to see the ranked candidates.
+
+## Follow-up requests like "close it" don't work
+Context is stored per session and expires after `session_ttl_minutes`. Check it
+with `hyprwhispr session`; if it is empty (for example after 30 idle minutes) the
+reference is gone. Say the target explicitly, or raise `session_ttl_minutes`.
+
+## The model keeps choosing the wrong tool
+Tool selection is model-driven, so quality depends on the model. Measure it with
+`python scripts/benchmark.py --live`, and try a larger model
+(`hyprwhispr model large`) if the small default is not accurate enough.
+
+
 ## "whisper binary not found" / "whisper model not found"
 Run `scripts/setup-whisper.sh` and `scripts/download-models.sh`.
 
