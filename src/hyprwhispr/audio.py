@@ -87,7 +87,7 @@ def record_start(cfg: dict) -> int:
     )
     config.PIDFILE.write_text(str(proc.pid))
     log_event({"event": "record_start", "pid": proc.pid})
-    notify("Listening...", "Hold the key, speak in English, then release.", timeout=4000)
+    notify("Listening...", "Hold the key, speak in any language, then release.", timeout=4000)
     return 0
 
 
