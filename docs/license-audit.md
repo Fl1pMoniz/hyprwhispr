@@ -76,7 +76,7 @@ Evidence was read from the upstream license file or the authoritative model card
 
 | Artifact | Source | Pinned | License | Evidence |
 |---|---|---|---|---|
-| `ggml-small.en.bin` | `huggingface.co/ggerganov/whisper.cpp` | SHA-256 `c6138d6d…41e5d` | MIT | HF model card: "License: mit"; converted from OpenAI Whisper (MIT) |
+| `ggml-small.bin` (default, multilingual) and `ggml-small.en.bin` (English-only) | `huggingface.co/ggerganov/whisper.cpp` | SHA-256 pinned in `scripts/download-models.sh` | MIT | HF model card: "License: mit"; converted from OpenAI Whisper (MIT); both artifacts live in the same MIT-licensed repository |
 | `qwen3:4b` | Ollama registry (pulled by user) | tag `qwen3:4b` | Apache-2.0 | HF model card `Qwen/Qwen3-4B`: "License: apache-2.0" |
 
 The project downloads these at the user's request and does not redistribute

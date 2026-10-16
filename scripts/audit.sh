@@ -61,7 +61,7 @@ grep -rhoE '"(zenity|rofi|notify-send|gtk-launch|gio|xdg-open|hyprctl|wpctl|pw-r
 
 echo "== pinned external artifacts =="
 grep -hoE 'WHISPER_CPP_COMMIT:-[0-9a-f]+' scripts/*.sh 2>/dev/null | sed 's/^/    whisper.cpp commit: /'
-grep -hoE 'ggml-[a-z]+\.en\.bin' scripts/*.sh 2>/dev/null | sort -u | sed 's/^/    model file: /'
+grep -hoE 'ggml-[a-z.]+\.bin' scripts/*.sh 2>/dev/null | sort -u | sed 's/^/    model file: /'
 
 echo
 if [ "$issues" -eq 0 ]; then

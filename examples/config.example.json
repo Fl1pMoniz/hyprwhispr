@@ -10,7 +10,7 @@
   "tool_mode": "auto",
   "whisper_gpu": true,
   "whisper_timeout": 120,
-  "language": "en",
+  "language": null,
   "sample_rate": 16000,
   "recorder": "pw-record",
   "mic_target": null,

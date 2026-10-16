@@ -74,10 +74,14 @@ DEFAULTS = {
     "model_aliases": {"small": "qwen3:4b", "large": "qwen3:8b"},
     # --- speech to text (whisper.cpp, local only) ---
     "whisper_bin": str(DATA_DIR / "whisper.cpp/build/bin/whisper-cli"),
-    "whisper_model": str(DATA_DIR / "models/ggml-small.en.bin"),
+    # Multilingual model (ggml-small.bin). The English-only ggml-small.en.bin was
+    # the old default; point whisper_model at it to force English-only behaviour.
+    "whisper_model": str(DATA_DIR / "models/ggml-small.bin"),
     "whisper_gpu": True,
     "whisper_timeout": 120,        # seconds before a transcription is aborted
-    "language": "en",
+    # null / "" / "auto" -> detect the spoken language automatically. Any other
+    # value is passed through to whisper.cpp as its ISO-639 code (e.g. "en", "pt").
+    "language": None,
     # --- audio capture ---
     "sample_rate": 16000,
     "recorder": "pw-record",

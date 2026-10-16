@@ -59,8 +59,11 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
    `silence_threshold_db`, is rejected before whisper runs (this removes the
    silence-hallucination class of bugs). Otherwise a detached worker
    (`python -m hyprwhispr process <file>`) does the slow work.
-3. **Transcribe**: `speech.transcribe` runs whisper.cpp (CUDA, falling back to
-   CPU on a GPU error), cleans the transcript, and removes its temporary files.
+3. **Transcribe**: `speech.transcribe` runs whisper.cpp with `-l auto` (or an
+   explicit language code from config), so the spoken language is detected and
+   the transcript stays in that language — never translated. CUDA is used with a
+   CPU fallback on a GPU error; the transcript is cleaned and its temporary files
+   are removed. The transcript is passed to the model unchanged.
 4. **Agent loop** (`llm.run_pipeline`): builds messages from the system prompt,
    configured aliases, remembered preferences, recent conversation history and
    the last referenced target, then repeatedly:

@@ -36,10 +36,13 @@ optional rofi rofi
 
 echo
 echo "Speech model:"
-if [ -f "$DATA_DIR/models/ggml-small.en.bin" ]; then
-  echo "  [ok]   ggml-small.en.bin"
+if [ -f "$DATA_DIR/models/ggml-small.bin" ]; then
+  echo "  [ok]   ggml-small.bin (multilingual, automatic language detection)"
+elif [ -f "$DATA_DIR/models/ggml-small.en.bin" ]; then
+  echo "  [warn] only ggml-small.en.bin found (English-only); run scripts/download-models.sh"
+  echo "         for the multilingual model that supports automatic detection"; warn=$((warn+1))
 else
-  echo "  [MISS] $DATA_DIR/models/ggml-small.en.bin (run scripts/download-models.sh)"; fail=$((fail+1))
+  echo "  [MISS] $DATA_DIR/models/ggml-small.bin (run scripts/download-models.sh)"; fail=$((fail+1))
 fi
 echo "Whisper binary:"
 if [ -x "$DATA_DIR/whisper.cpp/build/bin/whisper-cli" ]; then

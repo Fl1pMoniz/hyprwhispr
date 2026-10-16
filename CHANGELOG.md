@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Automatic multilingual speech recognition.** Default model is now the
+  multilingual `ggml-small.bin` and `language` defaults to `null` (whisper's
+  built-in auto-detection, `-l auto`). Speak Portuguese, English, Spanish and
+  other languages without per-language configuration; the transcript and reply
+  stay in the spoken language (transcription mode is used, never translation).
+- `speech.resolve_language` / `speech.build_command` with a format check for
+  explicit language codes (any short ISO-639 code is passed through to whisper).
+
+### Changed
+- `scripts/download-models.sh` defaults to the multilingual model, downloads to a
+  `.part` file, verifies the pinned SHA-256, and only then installs it; the
+  English-only `ggml-small.en.bin` remains available via `WHISPER_MODEL_NAME`.
+- `scripts/verify.sh` checks for the multilingual model and warns if only the
+  English-only model is present.
+- Ollama system prompt instructs the assistant to reply in the user's language.
+
 ## [1.1.0] - 2026-10-16
 
 Natural-language intelligence, reliable tool calling, context and speech-quality

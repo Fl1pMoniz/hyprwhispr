@@ -81,3 +81,63 @@ def test_transcribe_cpu_failure_returns_error(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "_run_whisper", fake_run)
     text, error = speech.transcribe(_cfg(tmp_path, gpu=False), "/tmp/a.wav")
     assert text == "" and "whisper failed" in error
+
+
+# --- language handling -------------------------------------------------------
+
+
+def _cmd_cfg(tmp_path, model="model.bin", language=None, gpu=True):
+    binary = tmp_path / "whisper-cli"
+    binary.write_text("")
+    model_path = tmp_path / model
+    model_path.write_text("")
+    return {"whisper_bin": str(binary), "whisper_model": str(model_path),
+            "whisper_gpu": gpu, "language": language}
+
+
+def test_resolve_language_auto_variants():
+    for value in (None, "", "auto", "AUTO", "  "):
+        assert speech.resolve_language(value) == ("auto", None)
+
+
+def test_resolve_language_explicit_codes_passed_through():
+    # Not restricted to a fixed list; any short code is forwarded to whisper.
+    for code in ("en", "pt", "es", "fr", "de", "it", "ar", "ja", "zh", "haw", "PT"):
+        lang, error = speech.resolve_language(code)
+        assert error is None and lang == code.lower()
+
+
+def test_resolve_language_rejects_invalid_values():
+    for bad in ("english", "e1", "12", "english language", "!!", 3):
+        lang, error = speech.resolve_language(bad)
+        assert lang is None and error
+
+
+def test_build_command_defaults_to_auto_detection(tmp_path):
+    cmd = speech.build_command(_cmd_cfg(tmp_path), "a.wav", "out", use_gpu=True)
+    assert cmd[cmd.index("-l") + 1] == "auto"
+    assert "-tr" not in cmd and "--translate" not in cmd  # never translate
+
+
+def test_build_command_explicit_language(tmp_path):
+    cmd = speech.build_command(_cmd_cfg(tmp_path, language="pt"), "a.wav", "out", use_gpu=True)
+    assert cmd[cmd.index("-l") + 1] == "pt"
+    assert "-tr" not in cmd and "--translate" not in cmd
+
+
+def test_build_command_uses_custom_model_path(tmp_path):
+    cfg = _cmd_cfg(tmp_path, model="ggml-large-v3.bin", language="en")
+    cmd = speech.build_command(cfg, "a.wav", "out", use_gpu=False)
+    assert cfg["whisper_model"] in cmd
+    assert "-ng" in cmd  # CPU flag when gpu disabled
+
+
+def test_transcribe_invalid_language_never_runs_whisper(monkeypatch, tmp_path):
+    cfg = _cmd_cfg(tmp_path, language="english")
+
+    def fail(*a, **k):
+        raise AssertionError("whisper must not run for an invalid language")
+
+    monkeypatch.setattr(speech, "_run_whisper", fail)
+    text, error = speech.transcribe(cfg, "/tmp/a.wav")
+    assert text == "" and "invalid language" in error

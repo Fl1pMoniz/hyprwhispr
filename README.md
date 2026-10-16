@@ -1,7 +1,7 @@
 # hyprwhispr
 
 A local, **hold-to-talk** desktop assistant for Hyprland. Hold a key, speak in
-English, release, and read a short text answer. Speech recognition and language
+your language, release, and read a short text answer. Speech recognition and language
 inference run entirely on your machine.
 
 ```
@@ -30,8 +30,11 @@ library only, and small enough to read in an afternoon.
 ## Features
 
 - Global **hold-to-talk** binding on Hyprland (`bind` + `bindr`).
-- **Local English speech-to-text** with whisper.cpp (`small.en`), CUDA or CPU,
-  with a silence/short-record gate and automatic GPU→CPU fallback.
+- **Local multilingual speech-to-text** with whisper.cpp (multilingual `small`),
+  CUDA or CPU, with a silence/short-record gate and automatic GPU→CPU fallback.
+- **Automatic language detection** — speak Portuguese, English, Spanish, French,
+  German, Italian, Arabic, Japanese, Chinese and more; whisper detects the
+  language and the reply stays in it. Pin a language with `"language": "pt"`.
 - **Local inference** through Ollama, with a configurable model (default
   `qwen3:4b`).
 - **Natural-language tool calling** — varied phrasing ("can you bring up my
@@ -127,10 +130,12 @@ Then `hyprctl reload`. Pick any unused key combination.
 
 Models are **downloaded at setup time and are not part of this repository**.
 
-- Whisper `ggml-small.en.bin` — downloaded from the upstream whisper.cpp Hugging
-  Face repository by `scripts/download-models.sh`, which verifies a pinned
-  SHA-256. OpenAI Whisper weights are MIT-licensed; the ggml conversion is
-  distributed by the whisper.cpp project.
+- Whisper `ggml-small.bin` — the **multilingual** model (supports automatic
+  language detection), downloaded from the upstream whisper.cpp Hugging Face
+  repository by `scripts/download-models.sh`, which verifies a pinned SHA-256.
+  OpenAI Whisper weights are MIT-licensed; the ggml conversion is distributed by
+  the whisper.cpp project. The English-only `ggml-small.en.bin` is still available
+  as an alternative (`WHISPER_MODEL_NAME=ggml-small.en.bin`).
 - `qwen3:4b` — pulled through Ollama from Ollama's registry; the Qwen3 weights
   are Apache-2.0.
 
@@ -141,6 +146,24 @@ See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for details and caveats.
 Configuration lives in `~/.config/hyprwhispr/config.json`. Start from
 `examples/config.example.json`; every key has a sensible default. Full reference:
 [`docs/configuration.md`](docs/configuration.md).
+
+### Languages
+
+Speech recognition speaks many languages out of the box: whisper auto-detects the
+spoken language and the transcript (and the reply) stay in it — no per-language
+setup. This needs the multilingual model (`ggml-small.bin`, the default).
+
+```jsonc
+"language": null      // default: detect the spoken language automatically
+"language": "en"      // force English
+"language": "pt"      // force Portuguese
+```
+
+Any short ISO-639 code whisper supports is passed straight through, so switching
+languages needs no code change. To return to automatic detection, set
+`"language": null` (or remove the key). If you set an explicit English-only model
+(`ggml-small.en.bin`) with `"language": null`, the assistant logs a warning because
+that model cannot detect other languages.
 
 Common tasks:
 
@@ -158,7 +181,7 @@ hyprwhispr refresh-apps      # rebuild app/game indexes
 ### VRAM (hardware-specific example)
 
 These are **measurements on one machine** (NVIDIA RTX 4070 12 GB, `qwen3:4b`,
-`small.en` on GPU) made with
+`small` on GPU) made with
 `nvidia-smi --query-compute-apps=process_name,used_memory --format=csv`:
 
 | State | Approx. VRAM held by hyprwhispr |

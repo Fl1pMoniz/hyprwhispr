@@ -53,7 +53,8 @@ in the user's data directory. It is not committed here.
 
 | Artifact | Source | Pinned | License | Evidence |
 |---|---|---|---|---|
-| `ggml-small.en.bin` (Whisper `small.en`, converted to ggml) | https://huggingface.co/ggerganov/whisper.cpp | SHA-256 `c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d` | MIT | HF model card states "License: mit"; converted from OpenAI Whisper (MIT) |
+| `ggml-small.bin` (Whisper `small`, **multilingual**) — default | https://huggingface.co/ggerganov/whisper.cpp | SHA-256 `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` | MIT | HF model card states "License: mit"; converted from OpenAI Whisper (MIT) |
+| `ggml-small.en.bin` (Whisper `small.en`, English-only) — alternative | https://huggingface.co/ggerganov/whisper.cpp | SHA-256 `c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d` | MIT | same repository/model card |
 | `qwen3:4b` | Ollama registry (`ollama pull qwen3:4b`) | tag `qwen3:4b` | Apache-2.0 | HF model card `Qwen/Qwen3-4B` states "License: apache-2.0" |
 
 `scripts/download-models.sh` fetches the Whisper model directly from the upstream

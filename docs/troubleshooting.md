@@ -38,6 +38,34 @@ Tool selection is model-driven, so quality depends on the model. Measure it with
 (`hyprwhispr model large`) if the small default is not accurate enough.
 
 
+## The wrong language is detected
+Automatic detection is the default (`"language": null`). If whisper guesses
+wrongly for short or noisy clips:
+- **Force the language** for how you actually speak: set `"language": "pt"` (or
+  `"en"`, `"es"`, ...). See `docs/configuration.md`.
+- **Make sure you have the multilingual model.** `scripts/verify.sh` warns if only
+  `ggml-small.en.bin` is present. `ggml-small.en.bin` is English-only and cannot
+  detect other languages; re-run `scripts/download-models.sh` for `ggml-small.bin`.
+- Very short or mixed-language phrases are the hardest cases — detection improves
+  with a full sentence and decent audio.
+- To go back to automatic detection, set `"language": null` (or remove the key).
+
+## Verifying multilingual transcription locally
+No microphone is needed — transcribe a WAV directly:
+
+```bash
+# make a 16 kHz mono clip, e.g. with espeak-ng (see the caveat below)
+espeak-ng -v es -w /tmp/es.wav "abrir el navegador y cerrar el juego"
+ffmpeg -y -loglevel error -i /tmp/es.wav -ar 16000 -ac 1 /tmp/es16.wav
+hyprwhispr transcribe /tmp/es16.wav     # whisper prints the detected language to stderr
+```
+The transcript should be in the **spoken** language, never translated to English.
+To confirm the language manually, add `-l pt` etc. via `"language"` in the config.
+
+Accuracy varies by language, accent, audio quality and model size. Robotic
+synthetic voices (espeak-ng) are frequently **misdetected** — use real speech for
+a fair test.
+
 ## "whisper binary not found" / "whisper model not found"
 Run `scripts/setup-whisper.sh` and `scripts/download-models.sh`.
 

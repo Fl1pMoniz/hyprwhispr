@@ -37,10 +37,28 @@ environment variables:
 | Key | Default | Meaning |
 |---|---|---|
 | `whisper_bin` | `<data>/whisper.cpp/build/bin/whisper-cli` | whisper.cpp binary |
-| `whisper_model` | `<data>/models/ggml-small.en.bin` | ggml model file |
+| `whisper_model` | `<data>/models/ggml-small.bin` | multilingual ggml model (supports auto detection) |
 | `whisper_gpu` | `true` | use CUDA; on a GPU error it retries on the CPU |
 | `whisper_timeout` | `120` | seconds before a transcription is aborted |
-| `language` | `en` | speech-recognition language |
+| `language` | `null` | spoken language: `null`/`"auto"` to detect, or a code like `"en"`/`"pt"` |
+
+### Languages
+
+`language` is `null` by default, so whisper.cpp **auto-detects** the spoken
+language (`-l auto`) and the transcript stays in that language — the reply does
+too. This requires the multilingual model; the old English-only
+`ggml-small.en.bin` cannot detect other languages (set `whisper_model` back to it
+only if you always speak English).
+
+- Automatic (default): `"language": null` (or omit the key, or `"auto"`).
+- Force a language: `"language": "en"`, `"language": "pt"`, `"language": "ja"`, ...
+  Any short ISO-639 code that whisper supports is passed straight through, so
+  there is no application-side language list to maintain.
+- Invalid values (e.g. `"english"`) are rejected with a clear error before
+  whisper runs.
+
+Transcription never translates: the `-tr`/`--translate` flag is not used, so a
+Portuguese recording yields a Portuguese transcript.
 
 ## Audio capture
 
