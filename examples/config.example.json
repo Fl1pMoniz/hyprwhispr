@@ -1,0 +1,21 @@
+{
+  "ollama_url": "http://127.0.0.1:11434",
+  "model": "qwen3:4b",
+  "keep_alive": "5m",
+  "num_ctx": 4096,
+  "temperature": 0.3,
+  "whisper_gpu": true,
+  "language": "en",
+  "sample_rate": 16000,
+  "recorder": "pw-record",
+  "mic_target": null,
+  "apps": {
+    "terminal": "kitty",
+    "file manager": "xdg-open .",
+    "browser": "xdg-open https://duckduckgo.com",
+    "editor": "kitty -e nvim"
+  },
+  "search_url": "https://duckduckgo.com/?q=",
+  "opencode_bin": "opencode",
+  "terminal_bin": "kitty"
+}

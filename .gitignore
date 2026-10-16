@@ -1,0 +1,36 @@
+# --- secrets / personal configuration ---
+.env
+*.env
+# user config files (keep examples/*.example.json committed instead)
+config.json
+
+# --- runtime data (never commit) ---
+*.wav
+*.bin
+*.gguf
+models/
+cache/
+logs/
+notes/
+record.pid
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- build artifacts / vendored sources ---
+whisper.cpp/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
