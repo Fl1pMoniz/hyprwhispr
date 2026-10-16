@@ -8,9 +8,11 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Automatic multilingual speech recognition.** Default model is now the
   multilingual `ggml-small.bin` and `language` defaults to `null` (whisper's
-  built-in auto-detection, `-l auto`). Speak Portuguese, English, Spanish and
-  other languages without per-language configuration; the transcript and reply
-  stay in the spoken language (transcription mode is used, never translation).
+  built-in auto-detection, `-l auto`). Speak Portuguese, Ukrainian, English,
+  Spanish and other languages without per-language configuration; the transcript
+  and reply stay in the spoken language (transcription mode is used, never
+  translation). Ukrainian verified (`-l uk`, LLM replies in Ukrainian) and added
+  as a documented example and benchmark fixture.
 - `speech.resolve_language` / `speech.build_command` with a format check for
   explicit language codes (any short ISO-639 code is passed through to whisper).
 - Benchmark extensions: multilingual fixtures (pt/es/de/it/ar/ja/zh), a separate

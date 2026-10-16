@@ -52,9 +52,9 @@ too. This requires the multilingual model; the old English-only
 only if you always speak English).
 
 - Automatic (default): `"language": null` (or omit the key, or `"auto"`).
-- Force a language: `"language": "en"`, `"language": "pt"`, `"language": "ja"`, ...
-  Any short ISO-639 code that whisper supports is passed straight through, so
-  there is no application-side language list to maintain.
+- Force a language: `"language": "en"`, `"language": "pt"`, `"language": "uk"`,
+  `"language": "ja"`, ... Any short ISO-639 code that whisper supports is passed
+  straight through, so there is no application-side language list to maintain.
 - Invalid values (e.g. `"english"`) are rejected with a clear error before
   whisper runs.
 

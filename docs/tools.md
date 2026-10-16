@@ -42,6 +42,12 @@ done playing, shut Steam down" because the model maps them to `open_app` /
 `close_app`. Configured `apps` aliases (for example `browser`, `terminal`,
 `editor`) are listed to the model so indirect references resolve.
 
+A tool is only ever triggered by machine tool-call syntax — native calls, a
+`<tool_call>` block, a fenced `json` block, or content that is itself a JSON
+object naming a registered tool. Naming a tool in ordinary prose never runs it,
+and any tool-call markup the model leaks into a reply is stripped before it
+reaches the user (with one bounded retry if no user-facing text remains).
+
 ## Application and Steam discovery
 
 `open_app` first checks the `apps` map in your config (handy aliases), then an

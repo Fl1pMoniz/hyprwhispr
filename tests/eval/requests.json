@@ -20,6 +20,7 @@
 
   {"text": "Abrir o Firefox.", "lang": "pt", "expect_tools": ["open_app"], "expect_arg": "firefox"},
   {"text": "Fechar o Steam.", "lang": "pt", "expect_tools": ["close_app"], "expect_arg": "steam"},
+  {"text": "Відкрий Firefox.", "lang": "uk", "expect_tools": ["open_app"], "expect_script": "cyrillic"},
   {"text": "Abre el navegador.", "lang": "es", "expect_tools": ["open_app"]},
   {"text": "Öffne den Browser.", "lang": "de", "expect_tools": ["open_app"]},
   {"text": "Chiudi Steam.", "lang": "it", "expect_tools": ["close_app"], "expect_arg": "steam"},

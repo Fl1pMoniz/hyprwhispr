@@ -32,14 +32,18 @@ library only, and small enough to read in an afternoon.
 - Global **hold-to-talk** binding on Hyprland (`bind` + `bindr`).
 - **Local multilingual speech-to-text** with whisper.cpp (multilingual `small`),
   CUDA or CPU, with a silence/short-record gate and automatic GPU→CPU fallback.
-- **Automatic language detection** — speak Portuguese, English, Spanish, French,
-  German, Italian, Arabic, Japanese, Chinese and more; whisper detects the
-  language and the reply stays in it. Pin a language with `"language": "pt"`.
+- **Automatic language detection** — speak 🇵🇹 Portuguese, 🇺🇦 Ukrainian,
+  🇬🇧 English, 🇪🇸 Spanish, 🇫🇷 French, 🇩🇪 German, 🇮🇹 Italian, 🇸🇦 Arabic,
+  🇯🇵 Japanese, 🇨🇳 Chinese and more; whisper detects the language and the reply
+  stays in it. Pin a language with `"language": "pt"`.
 - **Local inference** through Ollama, with a configurable model (default
   `qwen3:4b`).
 - **Natural-language tool calling** — varied phrasing ("can you bring up my
   browser?", "I'm done playing, shut Steam down") maps to the right tool via
   native function calling, with a strict JSON fallback for models without it.
+- **Safe, clean output** — a tool is only run by machine tool-call syntax (never
+  by prose that merely mentions it), and leaked tool-call markup or JSON is
+  stripped from replies, with a bounded retry if no user text remains.
 - **Conversation context** — follow-ups like "now close it" resolve against a
   bounded, expiring local session (not a database).
 - **Ambiguity handling** — when several apps match, it asks instead of guessing,
@@ -49,8 +53,8 @@ library only, and small enough to read in an afternoon.
 - **Web search** that opens your browser (the only feature that uses the network).
 - **Notes and preferences** stored locally as plain files.
 - **Confirmation gates** for shell commands, package installs and file deletion.
-- **Audit log** of tool name, status and duration (arguments and transcripts are
-  not logged by default).
+- **Audit log** of tool name, status and duration, plus per-turn timing metrics
+  (numbers only); arguments and transcripts are not logged by default.
 - **OpenCode integration** by launching it (optionally with a prepared prompt).
 - Microphone helpers: `list-mics`, `mictest`, and a terminal `listen` mode.
 - A repeatable **tool-selection benchmark** (`scripts/benchmark.py`).
@@ -155,8 +159,9 @@ setup. This needs the multilingual model (`ggml-small.bin`, the default).
 
 ```jsonc
 "language": null      // default: detect the spoken language automatically
-"language": "en"      // force English
-"language": "pt"      // force Portuguese
+"language": "en"      // force English 🇬🇧
+"language": "pt"      // force Portuguese 🇵🇹
+"language": "uk"      // force Ukrainian 🇺🇦
 ```
 
 Any short ISO-639 code whisper supports is passed straight through, so switching
@@ -192,6 +197,15 @@ These are **measurements on one machine** (NVIDIA RTX 4070 12 GB, `qwen3:4b`,
 
 Your numbers will differ with model, context size and driver. To reduce usage:
 `hyprwhispr model small`, `"whisper_gpu": false`, and a shorter `keep_alive`.
+
+### Latency
+
+Reply latency is dominated by how many tokens the local model generates (measured:
+turn time tracks generated tokens; model loading and tool calls are negligible).
+Each turn logs per-stage timings (total, LLM, tool, per-call and token counts) —
+numbers only. Investigate with `python scripts/benchmark.py --live`, and bound
+worst-case generation with the optional `"max_tokens"` setting: **measure first**,
+because a low cap trades tool-selection accuracy for speed.
 
 ## Commands
 

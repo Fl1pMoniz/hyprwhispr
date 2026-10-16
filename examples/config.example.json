@@ -5,6 +5,7 @@
   "keep_alive": "5m",
   "num_ctx": 4096,
   "temperature": 0.3,
+  "max_tokens": null,
   "request_timeout": 120,
   "max_tool_steps": 5,
   "tool_mode": "auto",

@@ -35,7 +35,7 @@ def test_script_matches_reliable_scripts():
 def test_multilingual_fixtures_exist_and_fake_mode_scores_them():
     requests = benchmark.load_requests()
     langs = {r.get("lang") for r in requests}
-    assert {"pt", "es", "de", "it", "ar", "ja", "zh"} <= langs
+    assert {"pt", "uk", "es", "de", "it", "ar", "ja", "zh"} <= langs
     cfg = {"num_ctx": 2048}
     results = [benchmark.evaluate(cfg, r, live=False) for r in requests if r.get("lang")]
     assert results and all(r["tool_ok"] for r in results)

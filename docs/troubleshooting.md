@@ -37,6 +37,23 @@ Tool selection is model-driven, so quality depends on the model. Measure it with
 `python scripts/benchmark.py --live`, and try a larger model
 (`hyprwhispr model large`) if the small default is not accurate enough.
 
+## Responses are sometimes slow (high latency)
+Latency is dominated by **how many tokens the model generates** — measured, turn
+time tracks generated tokens almost exactly; model loading and tool calls are
+negligible. Some replies simply generate a lot of tokens and take tens of seconds
+on `qwen3:4b`. To investigate or bound it:
+- `python scripts/benchmark.py --live` reports median/p95 for total, LLM and
+  per-call time, plus prompt/eval token counts (with sample counts).
+- The audit log writes a `turn` record per request with the same durations.
+- `"max_tokens"` (Ollama `num_predict`) caps generated tokens per reply. **Measure
+  first**: a low cap (e.g. 256) cuts latency but sharply reduces tool-selection
+  accuracy; the default `null` applies no cap.
+
+## Raw JSON or tool-call text appears in a reply
+That should not happen — chain-of-thought blocks, leaked `<tool_call>` markup and
+bare tool-call JSON are stripped from the final answer (see
+`docs/architecture.md`). If a reply still shows internal data, the model emitted
+an unusual format; note the exact text and open an issue.
 
 ## The wrong language is detected
 Automatic detection is the default (`"language": null`). If whisper guesses

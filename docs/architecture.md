@@ -41,7 +41,7 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
 | `validation.py` | argument validators (length, package-name shape) |
 | `audio.py` | microphone capture, WAV probe (duration/peak), `list-mics`, `mictest` |
 | `speech.py` | whisper.cpp invocation, GPU→CPU fallback, transcript cleanup |
-| `llm.py` | Ollama client, the agent loop, JSON-tool fallback, thinking cleanup |
+| `llm.py` | Ollama client, agent loop, tool-call parsing/sanitisation, timing |
 | `tools.py` | the tool registry (JSON schemas) and `dispatch_tool` |
 | `apps.py` | `.desktop` + Steam indexing, normalization, resolve/launch/close |
 | `memory.py` | notes and remembered preferences (persistent) |
@@ -73,19 +73,45 @@ engines: whisper.cpp (speech-to-text) and Ollama (the language model).
    - stops when the model answers with text, or when `max_tool_steps` is reached
      (then asks for a plain-text answer with tools disabled).
 5. **Guard rails**: duplicate identical tool calls are suppressed; unknown tools
-   and malformed arguments become error results the model must react to; the
-   model can never claim success without a confirming tool result.
-6. **Reply**: the text is shown with `notify-send`. `session` records the turn
-   and the referenced target so follow-ups ("close it") resolve.
+   and malformed arguments become error results the model must react to. A tool
+   is only requested by machine tool-call syntax (native calls, a `<tool_call>`
+   block, a fenced `json` block, or content that is itself a JSON object) — a
+   tool named only in prose is never executed. The model can never claim success
+   without a confirming tool result.
+6. **Reply** (`llm.clean_answer`): chain-of-thought blocks and any leaked
+   tool-call markup or bare tool-call JSON are stripped from the final text, so
+   internal data is never shown to the user. If nothing user-facing remains, the
+   loop makes **one bounded retry** asking for plain text and then falls back to
+   a short safe message. `session` records the turn and the referenced target so
+   follow-ups ("close it") resolve, and the text is shown with `notify-send`.
+
+## Timing and observability
+
+Each turn appends one `turn` record to the local audit log with stage timings
+and counts only — never prompts, transcripts or model output:
+
+- `steps`, `llm_calls`, `tool_calls`;
+- `llm_ms` (summed Ollama request time), `tool_ms` (tool execution), `total_ms`;
+- `llm_call_ms` (per-request durations);
+- `llm_prompt_tokens` / `llm_eval_tokens` / `llm_load_ms` (Ollama's non-content
+  response fields).
+
+Transcription is timed separately (a `transcribe` record), and the detached
+worker logs a `pipeline_total`. All durations use a monotonic clock.
+`scripts/benchmark.py` aggregates the same metrics across a fixed request set and
+reports median/p95 with sample counts; an optional `max_tokens` cap bounds
+worst-case generation latency (measure first — low caps hurt tool selection).
 
 ## Model compatibility
 
 Native Ollama tool calling is preferred. `llm.ollama_chat` raises
 `ToolsUnsupported` when a server rejects a request carrying tool schemas; the
 loop then switches to a **constrained JSON tool protocol** (the model replies
-with `{"tool": ..., "arguments": {...}}`), which is parsed strictly — only a
-JSON object naming a registered tool is accepted, so ordinary answers are never
-mistaken for a tool call. `tool_mode` can force `native` or `json`.
+with `{"tool": ..., "arguments": {...}}`), which is parsed strictly: only a
+`<tool_call>` block, a fenced `json` block, or content that is itself a JSON
+object naming a registered tool is accepted, and the arguments are coerced to an
+object. A JSON object embedded in ordinary prose is ignored, so free text is
+never mistaken for a tool call. `tool_mode` can force `native` or `json`.
 
 The tool executor (`tools.dispatch_tool`) is independent of the model
 provider, so another local model or server can be substituted without touching

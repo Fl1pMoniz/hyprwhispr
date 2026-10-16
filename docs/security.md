@@ -49,8 +49,10 @@ predictable and local-first.
 Every tool call, approval and denial is appended to
 `<data>/logs/audit.jsonl` with a timestamp, tool name, status and duration.
 Tool **arguments are not logged by default** (`log_tool_args`), and transcript
-text is **not written** to `exchanges.log` by default (`log_transcripts`). The
-short-lived conversation context in `<data>/state/session.json` is bounded,
+text is **not written** to `exchanges.log` by default (`log_transcripts`). Each
+turn also appends timing metrics (steps, call counts, per-stage durations and
+Ollama token counts) — numbers only, never prompts, transcripts or model output.
+The short-lived conversation context in `<data>/state/session.json` is bounded,
 expires, and is created with owner-only permissions. Nothing is sent anywhere.
 
 ## Reporting a vulnerability
